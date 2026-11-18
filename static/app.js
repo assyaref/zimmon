@@ -49,7 +49,6 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ---------------- auth ----------------
-  let otpOn = false;
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("loginMsg"), btn = $("loginBtn");
@@ -57,19 +56,19 @@
     try {
       const r = await fetch("/api/login", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user: $("u").value.trim(), pass: $("p").value, otp: $("otp").value.replace(/\s/g, "") }),
+        body: JSON.stringify({ user: $("u").value.trim(), pass: $("p").value }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
         msg.className = "msg good"; msg.textContent = "ACCESS GRANTED — WELCOME, AGENT";
-        $("p").value = ""; $("otp").value = "";
+        $("p").value = "";
         await sleep(700);
         showDash();
       } else if (r.status === 429) {
         msg.className = "msg bad"; msg.textContent = "TERMINAL LOCKED — TOO MANY ATTEMPTS. RETRY IN 15 MIN.";
       } else {
-        msg.className = "msg bad"; $("otp").value = "";
-        msg.textContent = "ACCESS DENIED" + (otpOn ? " (CEK PASSWORD & KODE 2FA)" : "") + (j.left !== undefined ? ` — ${j.left} ATTEMPT(S) LEFT` : "");
+        msg.className = "msg bad";
+        msg.textContent = "ACCESS DENIED" + (j.left !== undefined ? ` — ${j.left} ATTEMPT(S) LEFT` : "");
       }
     } catch {
       msg.className = "msg bad"; msg.textContent = "UPLINK FAILURE — CHECK CONNECTION";
@@ -360,9 +359,6 @@
   fetch("/api/session").then((r) => r.json()).then((j) => {
     checkVersion(j.version);
     $("openTerm").classList.toggle("hidden", !j.terminal);
-    otpOn = !!j.otp;
-    $("otpRow").classList.toggle("hidden", !otpOn);
-    $("otp").required = otpOn;
     j.ok ? showDash() : showLogin();
   }).catch(showLogin);
 })();
