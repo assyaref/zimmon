@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#030807">
+<title>ZIMMON // OPS CENTER</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="scan"></div>
+<div class="classbar">CLASSIFIED // EYES ONLY // ZIMMON-7</div>
+<button id="updBanner" class="upd hidden">▲ UPDATE TERSEDIA — KETUK UNTUK MEMUAT VERSI BARU</button>
+
+<!-- ============ LOGIN ============ -->
+<section id="login" class="screen">
+  <div class="seal">
+    <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+    <div class="sweep"></div>
+    <div class="seal-text">ZM<br><small>OPS</small></div>
+  </div>
+  <h1 class="glitch" data-text="RESTRICTED ACCESS">RESTRICTED ACCESS</h1>
+  <p class="sub">AUTHORIZED PERSONNEL ONLY · SIGINT NODE MAIL-KSOLRS</p>
+  <pre id="boot" class="boot"></pre>
+  <form id="loginForm" class="panel login-panel hidden" autocomplete="on">
+    <label>AGENT ID<input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label>PASSPHRASE<input id="p" name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit" id="loginBtn">▶ AUTHENTICATE</button>
+    <div id="loginMsg" class="msg"></div>
+  </form>
+</section>
+
+<!-- ============ DASHBOARD ============ -->
+<section id="dash" class="screen hidden">
+  <header class="top">
+    <div>
+      <div class="tag">OPERATION ZIMBRA WATCH</div>
+      <div class="host" id="host">—</div>
+    </div>
+    <button id="logout" class="ghost">⏻ LOGOUT</button>
+  </header>
+
+  <div class="clocks">
+    <div><span>WIB</span><b id="clkLocal">--:--:--</b></div>
+    <div><span>ZULU</span><b id="clkZulu">--:--:--</b></div>
+    <div><span>UPTIME</span><b id="uptime">—</b></div>
+  </div>
+
+  <div id="threat" class="threat">
+    <div class="threat-label">THREAT LEVEL</div>
+    <div class="threat-value" id="threatVal">ACQUIRING…</div>
+    <div class="threat-why" id="threatWhy"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel radar-panel">
+      <div class="ph">// ASSET RADAR</div>
+      <div class="radar" id="radar">
+        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+        <div class="cross h"></div><div class="cross v"></div>
+        <div class="sweep"></div>
+      </div>
+      <div class="legend"><i class="dot ok"></i>ACTIVE <i class="dot bad"></i>DOWN</div>
+    </div>
+
+    <div class="panel">
+      <div class="ph">// VITALS</div>
+      <div class="gauge" id="gCpu"><span>CPU</span><div class="bar"><i></i></div><b>—</b></div>
+      <div class="gauge" id="gMem"><span>RAM</span><div class="bar"><i></i></div><b>—</b></div>
+      <div class="gauge" id="gDisk"><span>DISK</span><div class="bar"><i></i></div><b>—</b></div>
+      <div class="gauge" id="gSwap"><span>SWAP</span><div class="bar"><i></i></div><b>—</b></div>
+      <canvas id="spark" height="90"></canvas>
+      <div class="spark-legend"><i class="l cpu"></i>CPU <i class="l mem"></i>RAM <i class="l disk"></i>DISK · 10 MIN</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// INTEL SUMMARY</div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// SERVICES <span id="svcCount" class="dim"></span></div>
+    <div class="chips" id="services"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// PERIMETER (PORTS)</div>
+    <div class="chips" id="ports"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// MAIL TRAFFIC <span id="mailWin" class="dim"></span></div>
+    <div class="stats" id="mail"></div>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// INTERCEPTED ALERTS</div>
+    <pre class="feed" id="alerts">NO TRAFFIC</pre>
+  </div>
+
+  <div class="panel">
+    <div class="ph">// TOP PROCESSES</div>
+    <table class="procs"><thead><tr><th>PID</th><th>USER</th><th>CPU%</th><th>MEM%</th><th>CMD</th></tr></thead><tbody id="procs"></tbody></table>
+  </div>
+
+  <footer class="foot">
+    <span id="last">LAST INTERCEPT: —</span>
+    <span id="ver" class="dim">v—</span>
+    <span id="link" class="link ok">● UPLINK</span>
+  </footer>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>
