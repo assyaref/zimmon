@@ -25,6 +25,7 @@ import threading
 import time
 import calendar
 import collections
+import ipaddress
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
@@ -343,9 +344,80 @@ class LogTail:
         return (lines[1:] if skip_first else lines), cut
 
 
+class AsnLookup:
+    """IP -> ASN via Team Cymru's bulk whois (whois.cymru.com:43), cached in memory.
+
+    Disable with "asn_lookup": false in /etc/zimmon/config.json.
+    """
+
+    HOST, PORT = "whois.cymru.com", 43
+    TTL, RETRY = 7 * 86400, 3600   # keep answers a week; retry failures after an hour
+    BATCH, MAX_CACHE = 1000, 50_000
+
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.cache = {}   # ip -> (expires, info dict or None)
+
+    @staticmethod
+    def _public(ip):
+        try:
+            return ipaddress.ip_address(ip).is_global
+        except ValueError:
+            return False
+
+    def get(self, ip):
+        hit = self.cache.get(ip)
+        return hit[1] if hit else None
+
+    def refresh(self, ips):
+        """Look up IPs not yet cached (or expired). Returns True if anything new was learned."""
+        if not self.enabled:
+            return False
+        now = time.time()
+        todo = [ip for ip in ips if self._public(ip) and (ip not in self.cache or self.cache[ip][0] < now)]
+        if not todo:
+            return False
+        todo = todo[:self.BATCH]
+        try:
+            found = self._query(todo)
+        except Exception as e:
+            print("asn:", e, flush=True)
+            found = {}
+        for ip in todo:
+            info = found.get(ip)
+            self.cache[ip] = (now + (self.TTL if info else self.RETRY), info)
+        if len(self.cache) > self.MAX_CACHE:
+            for ip in sorted(self.cache, key=lambda k: self.cache[k][0])[:len(self.cache) - self.MAX_CACHE]:
+                del self.cache[ip]
+        return bool(found)
+
+    def _query(self, ips):
+        req = ("begin\nverbose\n" + "\n".join(ips) + "\nend\n").encode()
+        with socket.create_connection((self.HOST, self.PORT), timeout=20) as s:
+            s.settimeout(30)
+            s.sendall(req)
+            data = b""
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > 5_000_000:
+                    break
+        out = {}
+        # AS | IP | BGP Prefix | CC | Registry | Allocated | AS Name
+        for line in data.decode("utf-8", "replace").splitlines():
+            f = [x.strip() for x in line.split("|")]
+            if len(f) < 7 or not f[0].isdigit():
+                continue
+            out[f[1]] = {"asn": int(f[0]), "prefix": f[2], "cc": f[3].upper()[:2], "name": f[6][:80]}
+        return out
+
+
 class Detector:
-    def __init__(self, host, suspect_send_per_hour=150):
+    def __init__(self, host, suspect_send_per_hour=150, asn_lookup=True):
         self.host = host
+        self.asn = AsnLookup(asn_lookup)
         self.suspect = suspect_send_per_hour
         self.lock = threading.Lock()
         self.events = collections.deque(maxlen=MAX_EVENTS)  # (ts, cat, ip, who)
@@ -380,6 +452,15 @@ class Detector:
             while self.events and self.events[0][0] < now - WINDOW:
                 self.events.popleft()
             self.result = self._analyze(now)
+            ips = [r["ip"] for r in self.result["active"]] + [r["ip"] for r in self.result["top"]] + \
+                  [b["ip"] for b in self.result["breaches"]] + self._ips_by_count()
+        if self.asn.refresh(list(dict.fromkeys(ips))):  # network call: done without holding the lock
+            with self.lock:
+                self.result = self._analyze(now)
+
+    def _ips_by_count(self):
+        c = collections.Counter(ip for _, cat, ip, _ in self.events if cat not in ("ok", "submit") and ip not in self.own)
+        return [ip for ip, _ in c.most_common()]
 
     def _line(self, key, line, now, out):
         if key == "zimbra":
@@ -483,7 +564,19 @@ class Detector:
         def ip_row(d):
             return {"ip": d["ip"], "n": d["n"], "recent": d["recent"], "last": int(d["last"]),
                     "cats": [CATEGORIES.get(c, c) for c, _ in d["cats"].most_common()],
-                    "who": [w for w, _ in d["who"].most_common(3)]}
+                    "who": [w for w, _ in d["who"].most_common(3)], "asn": self.asn.get(d["ip"])}
+
+        asns = {}
+        for d in ips.values():
+            info = self.asn.get(d["ip"])
+            if not info:
+                continue
+            a = asns.setdefault(info["asn"], {"asn": info["asn"], "name": info["name"], "cc": info["cc"], "n": 0, "ips": 0, "recent": 0})
+            a["n"] += d["n"]
+            a["ips"] += 1
+            a["recent"] += d["recent"]
+        for b in breaches:
+            b["asn"] = self.asn.get(b["ip"])
 
         return {
             "level": level,
@@ -493,6 +586,8 @@ class Detector:
             "active": [ip_row(d) for d in active[:10]],
             "top": [ip_row(d) for d in sorted(ips.values(), key=lambda d: -d["n"])[:15]],
             "targets": [{"account": a, "n": n} for a, n in targets.most_common(8)],
+            "asns": sorted(asns.values(), key=lambda a: -a["n"])[:10],
+            "asn_on": self.asn.enabled,
             "breaches": breaches[:10],
             "suspicious": suspicious[:10],
             "sent_today": self.sent_by_day[time.strftime("%Y-%m-%d")],
@@ -796,7 +891,7 @@ DET = None
 
 def main():
     global DET
-    DET = Detector(HOST, int(CONF.get("suspect_send_per_hour", 150)))
+    DET = Detector(HOST, int(CONF.get("suspect_send_per_hour", 150)), CONF.get("asn_lookup", True) is not False)
     threading.Thread(target=DET.loop, daemon=True).start()
     threading.Thread(target=fast_loop, daemon=True).start()
     threading.Thread(target=slow_loop, daemon=True).start()

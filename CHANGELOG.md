@@ -1,5 +1,10 @@
 # ZIMMON changelog
 
+## 1.4.0 — 2026-11-18
+- **ASN penyerang**: setiap IP penyerang kini menampilkan jaringan asalnya (nomor AS, nama operator, bendera negara), termasuk di peringatan serangan aktif dan akun dibobol
+- Panel baru **JARINGAN (ASN) PENYERANG**: 10 ASN dengan percobaan serangan terbanyak (ketuk untuk detail di bgp.he.net)
+- Data dari Team Cymru (`whois.cymru.com`, port TCP 43), disimpan di memori 7 hari; IP privat tidak dicari. Matikan dengan `"asn_lookup": false` di config
+
 ## 1.3.0 — 2026-11-19
 - **Deteksi serangan** (24 jam), membaca log Zimbra, audit login webmail/IMAP/POP, SSH, dan login ZIMMON:
   - Brute force SMTP AUTH, webmail/IMAP/POP, SSH, dan ZIMMON; percobaan relay spam; bot/spammer (postscreen)
