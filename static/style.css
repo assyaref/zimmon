@@ -154,6 +154,7 @@ button{font:inherit;cursor:pointer}
 .atk-row .n{text-align:right;color:var(--red);font-weight:700}
 .atk-row .meta{grid-column:1 / -1;font-size:10px;color:var(--dim)}
 .atk-row .live{color:var(--red);font-weight:700}
+.atk-row .asn{display:block;color:var(--g2);margin-bottom:1px}
 
 /* ---------- terminal ---------- */
 .actions{display:flex;gap:6px}

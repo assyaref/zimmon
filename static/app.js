@@ -210,6 +210,10 @@
     return m < 60 ? `${m} mnt lalu` : `${Math.floor(m / 60)} jam lalu`;
   };
 
+  // "AS15169 GOOGLE · US" (country code as flag emoji)
+  const flag = (cc) => /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0))) + " " : "";
+  const asnText = (x) => x ? `${flag(x.cc)}AS${x.asn} ${x.name}` : "";
+
   function renderAttacks(a) {
     if (!a.level) { $("atkLevel").textContent = "MEMINDAI…"; return; }
     $("atkLevel").className = "atk-level " + a.level;
@@ -217,11 +221,11 @@
 
     const alerts = [];
     (a.breaches || []).forEach((b) => alerts.push(
-      `<div class="atk-alert"><b>⚠ KEMUNGKINAN AKUN DIBOBOL</b>IP ${esc(b.ip)} gagal login ${b.fails}× lalu BERHASIL masuk sebagai <b>${esc(b.account)}</b> (${ago(b.ts)}). Segera ganti password akun ini.</div>`));
+      `<div class="atk-alert"><b>⚠ KEMUNGKINAN AKUN DIBOBOL</b>IP ${esc(b.ip)}${b.asn ? " (" + esc(asnText(b.asn)) + ")" : ""} gagal login ${b.fails}× lalu BERHASIL masuk sebagai <b>${esc(b.account)}</b> (${ago(b.ts)}). Segera ganti password akun ini.</div>`));
     (a.suspicious || []).forEach((x) => alerts.push(
       `<div class="atk-alert"><b>⚠ AKUN MENGIRIM EMAIL MASSAL</b><b>${esc(x.account)}</b> mengirim ${x.per_hour} email dalam 1 jam terakhir. Kemungkinan dipakai spammer: cek akun dan ganti passwordnya.</div>`));
     (a.active || []).forEach((x) => alerts.push(
-      `<div class="atk-alert warn"><b>● SERANGAN AKTIF</b>IP ${esc(x.ip)}: ${x.recent} percobaan dalam 15 menit (${esc(x.cats.join(", "))})${x.who.length ? " · target: " + esc(x.who.join(", ")) : ""}</div>`));
+      `<div class="atk-alert warn"><b>● SERANGAN AKTIF</b>IP ${esc(x.ip)}${x.asn ? " (" + esc(asnText(x.asn)) + ")" : ""}: ${x.recent} percobaan dalam 15 menit (${esc(x.cats.join(", "))})${x.who.length ? " · target: " + esc(x.who.join(", ")) : ""}</div>`));
     $("atkAlerts").innerHTML = alerts.join("");
 
     $("atkCats").innerHTML = (a.categories || []).map((c) =>
@@ -234,8 +238,13 @@
 
     $("atkTop").innerHTML = (a.top || []).map((x) =>
       `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(x.ip)}" target="_blank" rel="noopener noreferrer">${esc(x.ip)}</a><span class="n">${x.n}×</span>` +
-      `<span class="meta">${x.recent >= 10 ? '<span class="live">● AKTIF · </span>' : ""}${esc(x.cats.join(", "))} · ${ago(x.last)}${x.who.length ? " · " + esc(x.who.join(", ")) : ""}</span></div>`
+      `<span class="meta">${x.asn ? `<span class="asn">${esc(asnText(x.asn))}</span>` : ""}${x.recent >= 10 ? '<span class="live">● AKTIF · </span>' : ""}${esc(x.cats.join(", "))} · ${ago(x.last)}${x.who.length ? " · " + esc(x.who.join(", ")) : ""}</span></div>`
     ).join("") || '<span class="dim">Tidak ada percobaan serangan terdeteksi.</span>';
+
+    $("atkAsn").innerHTML = (a.asns || []).map((x) =>
+      `<div class="atk-row"><a href="https://bgp.he.net/AS${x.asn}" target="_blank" rel="noopener noreferrer">${esc(flag(x.cc))}AS${x.asn}</a><span class="n">${x.n}×</span>` +
+      `<span class="meta">${esc(x.name)} · ${x.ips} IP${x.recent ? ` · <span class="live">${x.recent} dalam 15 mnt</span>` : ""}</span></div>`
+    ).join("") || `<span class="dim">${a.asn_on === false ? "Lookup ASN dimatikan di config." : a.unique_ips ? "Mencari data ASN…" : "Belum ada data."}</span>`;
 
     $("atkTargets").innerHTML = (a.targets || []).map((t) => `<span class="chip bad">${esc(t.account)} · ${t.n}×</span>`).join("") ||
       '<span class="dim">Belum ada akun yang diincar.</span>';
