@@ -74,6 +74,12 @@ STATE = {
 SESSIONS = {}
 FAILS = {}
 
+# Two-factor login (TOTP, RFC 6238). Enable with: bash /opt/zimmon/install.sh --2fa
+TOTP_SECRET = str(CONF.get("totp_secret") or "").strip().replace(" ", "").upper()
+TOTP_ON = bool(TOTP_SECRET)
+TOTP_LAST = [0]   # last accepted 30-second step: a code can only be used once
+TOTP_LOCK = threading.Lock()
+
 
 # ---------------------------------------------------------------- helpers
 def run(cmd, timeout=90):
@@ -616,6 +622,30 @@ def check_login(user, password):
     return ok_user and ok_pass
 
 
+def totp_code(secret, step):
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8))
+    h = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1_000_000)
+
+
+def check_totp(code):
+    """Accept the current code or its neighbour (+-30 s clock drift); reject reuse. Fails closed."""
+    code = re.sub(r"\s", "", str(code or ""))
+    if not re.fullmatch(r"\d{6}", code):
+        return False
+    now = int(time.time() // 30)
+    try:
+        with TOTP_LOCK:
+            for step in (now - 1, now, now + 1):
+                if step > TOTP_LAST[0] and hmac.compare_digest(totp_code(TOTP_SECRET, step), code):
+                    TOTP_LAST[0] = step
+                    return True
+    except Exception as e:  # malformed secret in config: nobody gets in until it is fixed
+        print("2fa:", e, flush=True)
+    return False
+
+
 def locked(ip):
     now = time.time()
     FAILS[ip] = [t for t in FAILS.get(ip, []) if now - t < FAIL_WINDOW]
@@ -793,7 +823,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data["attacks"] = DET.snapshot() if DET else {}
             return self.send_json(200, data)
         if path == "/api/session":
-            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
+            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON, "otp": TOTP_ON})
         if path == "/api/term":
             return self.open_terminal()
         if path in STATIC_FILES:
@@ -855,9 +885,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 n = min(int(self.headers.get("Content-Length", 0)), 4096)
                 req = json.loads(self.rfile.read(n) or b"{}")
                 user, pw = str(req.get("user", ""))[:128], str(req.get("pass", ""))[:256]
+                otp = str(req.get("otp", ""))[:16]
             except Exception:
                 return self.send_json(400, {"error": "bad request"})
-            if check_login(user, pw):
+            # the OTP is only checked (and consumed) once the password is right
+            if check_login(user, pw) and (not TOTP_ON or check_totp(otp)):
                 FAILS.pop(ip, None)
                 sid = secrets.token_urlsafe(32)
                 SESSIONS[sid] = time.time() + SESSION_TTL

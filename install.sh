@@ -18,19 +18,34 @@ if [ ! -f /etc/zimmon/config.json ] || [ "$1" = "--reset-password" ]; then
   read -rsp "Password login: " P; echo
   read -rsp "Ulangi password: " P2; echo
   [ -n "$P" ] && [ "$P" = "$P2" ] || { echo "Password kosong atau tidak sama"; exit 1; }
-  ZU="$U" ZP="$P" ZH="$HOST" ZPORT="$PORT" python3 - <<'PY' > /etc/zimmon/config.json
+  # keep any other settings (terminal, asn_lookup, totp_secret, ...) already in the config
+  ZU="$U" ZP="$P" ZH="$HOST" ZPORT="$PORT" python3 - <<'PY'
 import os, json, hashlib, secrets
+path = "/etc/zimmon/config.json"
+try:
+    conf = json.load(open(path))
+except Exception:
+    conf = {}
 salt = secrets.token_bytes(16); it = 310000
-print(json.dumps({
+conf.update({
   "user": os.environ["ZU"], "salt": salt.hex(), "iter": it,
   "hash": hashlib.pbkdf2_hmac("sha256", os.environ["ZP"].encode(), salt, it).hex(),
-  "host": os.environ["ZH"], "port": int(os.environ["ZPORT"]),
-}, indent=2))
+})
+conf.setdefault("host", os.environ["ZH"]); conf.setdefault("port", int(os.environ["ZPORT"]))
+fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with open(fd, "w") as f:
+    json.dump(conf, f, indent=2)
+os.replace(path + ".tmp", path)
 PY
   unset P P2
   chmod 600 /etc/zimmon/config.json
   echo "Password disimpan sebagai hash (PBKDF2), bukan teks asli."
 fi
+
+case "${1:-}" in
+  --2fa) python3 "$DIR/twofa.py" on || exit 1 ;;
+  --2fa-off) python3 "$DIR/twofa.py" off ;;
+esac
 
 cat > /etc/systemd/system/zimmon.service <<EOF
 [Unit]

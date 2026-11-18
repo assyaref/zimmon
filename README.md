@@ -17,6 +17,8 @@ cd /root/zimmon && bash install.sh
 
 Installer meminta username dan password login. Password disimpan sebagai hash PBKDF2 di `/etc/zimmon/config.json` (tidak pernah masuk ke repo ini).
 
+**2FA (disarankan, karena ZIMMON memberi akses root lewat terminal):** `bash /opt/zimmon/install.sh --2fa`, lalu scan QR atau masukkan kuncinya di Google Authenticator. Setelah itu login butuh password + kode 6 digit. Jam VPS harus akurat (NTP).
+
 Lalu di HP: buka `https://<host>:9443` di Chrome → menu ⋮ → **Install app**.
 
 ## Update / upgrade
@@ -40,6 +42,8 @@ Perintah lain:
 | `zimmon-update --status` | Versi terpasang, repo, daftar backup |
 | `zimmon-update --rollback` | Kembali ke versi sebelumnya |
 | `bash /opt/zimmon/install.sh --reset-password` | Ganti username/password |
+| `bash /opt/zimmon/install.sh --2fa` | Aktifkan 2FA / pasang di HP baru |
+| `bash /opt/zimmon/install.sh --2fa-off` | Matikan 2FA (misalnya HP hilang) |
 
 Di HP, aplikasi menampilkan banner **UPDATE TERSEDIA** begitu server sudah diupdate. Ketuk untuk memuat versi baru.
 
@@ -58,6 +62,7 @@ static/        aplikasi web: index.html, app.js, style.css, manifest, service wo
 static/vendor/ xterm.js (MIT) untuk terminal
 install.sh     instalasi pertama + systemd service
 update.sh      dipasang sebagai /usr/local/bin/zimmon-update
+twofa.py       pengaturan 2FA (dipanggil oleh install.sh --2fa / --2fa-off)
 VERSION        nomor versi
 ```
 

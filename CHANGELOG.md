@@ -1,5 +1,12 @@
 # ZIMMON changelog
 
+## 1.5.0 — 2026-11-18
+- **Login 2FA (TOTP)**: login bisa diwajibkan memakai kode 6 digit dari Google Authenticator / Microsoft Authenticator / Authy, selain password. Ini juga melindungi terminal root
+  - Aktifkan: `bash /opt/zimmon/install.sh --2fa` (tampilkan QR kalau `qrencode` terpasang, minta kode konfirmasi sebelum disimpan)
+  - Matikan (misalnya HP hilang): `bash /opt/zimmon/install.sh --2fa-off`
+  - Kode hanya bisa dipakai sekali, toleransi selisih jam ±30 detik, salah kode dihitung sebagai login gagal (terkunci setelah 5×)
+- `--reset-password` tidak lagi menghapus pengaturan lain di config (2FA, terminal, asn_lookup, dll.)
+
 ## 1.4.0 — 2026-11-18
 - **ASN penyerang**: setiap IP penyerang kini menampilkan jaringan asalnya (nomor AS, nama operator, bendera negara), termasuk di peringatan serangan aktif dan akun dibobol
 - Panel baru **JARINGAN (ASN) PENYERANG**: 10 ASN dengan percobaan serangan terbanyak (ketuk untuk detail di bgp.he.net)

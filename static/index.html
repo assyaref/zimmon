@@ -28,6 +28,7 @@
   <form id="loginForm" class="panel login-panel hidden" autocomplete="on">
     <label>AGENT ID<input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label>PASSPHRASE<input id="p" name="password" type="password" autocomplete="current-password" required></label>
+    <label id="otpRow" class="hidden">KODE 2FA <span class="dim">(Google Authenticator)</span><input id="otp" name="otp" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" placeholder="000000"></label>
     <button type="submit" id="loginBtn">▶ AUTHENTICATE</button>
     <div id="loginMsg" class="msg"></div>
   </form>
