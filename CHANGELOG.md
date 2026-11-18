@@ -1,5 +1,8 @@
 # ZIMMON changelog
 
+## 1.5.0 — 2026-11-18
+- `install.sh --reset-password` tidak lagi menghapus pengaturan lain di `/etc/zimmon/config.json` (terminal, asn_lookup, dll.); sebelumnya seluruh file ditulis ulang
+
 ## 1.4.0 — 2026-11-18
 - **ASN penyerang**: setiap IP penyerang kini menampilkan jaringan asalnya (nomor AS, nama operator, bendera negara), termasuk di peringatan serangan aktif dan akun dibobol
 - Panel baru **JARINGAN (ASN) PENYERANG**: 10 ASN dengan percobaan serangan terbanyak (ketuk untuk detail di bgp.he.net)
