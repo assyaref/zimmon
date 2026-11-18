@@ -359,7 +359,6 @@
   fetch("/api/session").then((r) => r.json()).then((j) => {
     checkVersion(j.version);
     $("openTerm").classList.toggle("hidden", !j.terminal);
-    $("termUser").textContent = j.term_mode === "root" ? "ROOT" : "LOGIN";
     j.ok ? showDash() : showLogin();
   }).catch(showLogin);
 })();

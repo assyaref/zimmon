@@ -52,11 +52,8 @@ STATIC_FILES = {
     "/vendor/xterm.css": ("vendor/xterm.css", "text/css; charset=utf-8"),
 }
 
-# Web terminal. Disable with "terminal": false in /etc/zimmon/config.json
+# Web terminal (root shell). Disable with "terminal": false in /etc/zimmon/config.json
 TERMINAL_ON = CONF.get("terminal", True) is not False
-# "login" (default): the terminal starts at the system login prompt (username + Linux password, via PAM);
-# use su/sudo from there for root. "root": open a root shell directly (old behaviour).
-TERM_MODE = "root" if CONF.get("terminal_mode") == "root" else "login"
 TERM_IDLE = int(CONF.get("terminal_idle_min", 30)) * 60
 TERM_MAX = 3
 TERM_LOG = "/var/log/zimmon-terminal.log"
@@ -673,18 +670,10 @@ def ws_send(sock, op, data=b""):
 
 
 def run_terminal(sock, ip):
-    """Bridge a websocket to a login prompt (or root shell) on a pty. Single thread (SSL objects are not thread-safe)."""
+    """Bridge a websocket to a root login shell on a pty. Single thread (SSL objects are not thread-safe)."""
     pid, fd = pty.fork()
     if pid == 0:  # child: never return into the server code
         try:
-            if TERM_MODE == "login":
-                # login(1) asks for a Linux user + password, runs PAM, and records the session in
-                # auth.log / wtmp with the browser's IP as remote host
-                for path in ("/bin/login", "/usr/bin/login"):
-                    if os.path.exists(path):
-                        os.execve(path, ["login", "-h", ip], {"TERM": "xterm-256color", "LANG": "C.UTF-8"})
-                os.write(1, b"\r\n[ZIMMON] /bin/login tidak ditemukan.\r\n")
-                os._exit(1)
             os.chdir("/root")
             env = {"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root",
                    "SHELL": "/bin/bash", "LANG": "C.UTF-8",
@@ -692,7 +681,7 @@ def run_terminal(sock, ip):
             os.execve("/bin/bash", ["bash", "-l"], env)
         finally:
             os._exit(1)
-    term_log(f"OPEN  ip={ip} pid={pid} mode={TERM_MODE}")
+    term_log(f"OPEN  ip={ip} pid={pid}")
     started = last = time.time()
     reason = "closed"
     try:
@@ -804,7 +793,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data["attacks"] = DET.snapshot() if DET else {}
             return self.send_json(200, data)
         if path == "/api/session":
-            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON, "term_mode": TERM_MODE})
+            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
         if path == "/api/term":
             return self.open_terminal()
         if path in STATIC_FILES:

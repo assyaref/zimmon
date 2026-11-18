@@ -1,9 +1,7 @@
 # ZIMMON changelog
 
 ## 1.5.0 — 2026-11-18
-- **Terminal tidak lagi langsung root**: terminal dimulai dari prompt login Linux (user + password VPS, lewat PAM). Untuk root, login sebagai user biasa lalu `su -` / `sudo`. Login tercatat di `auth.log`/`last` dengan IP pengakses
-  - Perilaku lama (langsung shell root) masih bisa dipakai dengan `"terminal_mode": "root"` di config
-- `--reset-password` tidak lagi menghapus pengaturan lain di config (terminal, asn_lookup, dll.)
+- `install.sh --reset-password` tidak lagi menghapus pengaturan lain di `/etc/zimmon/config.json` (terminal, asn_lookup, dll.); sebelumnya seluruh file ditulis ulang
 
 ## 1.4.0 — 2026-11-18
 - **ASN penyerang**: setiap IP penyerang kini menampilkan jaringan asalnya (nomor AS, nama operator, bendera negara), termasuk di peringatan serangan aktif dan akun dibobol
