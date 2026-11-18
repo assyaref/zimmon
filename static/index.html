@@ -40,7 +40,10 @@
       <div class="tag">OPERATION ZIMBRA WATCH</div>
       <div class="host" id="host">—</div>
     </div>
-    <button id="logout" class="ghost">⏻ LOGOUT</button>
+    <div class="actions">
+      <button id="openTerm" class="ghost term-btn hidden">&gt;_ TERMINAL</button>
+      <button id="logout" class="ghost">⏻ LOGOUT</button>
+    </div>
   </header>
 
   <div class="clocks">
@@ -112,6 +115,23 @@
     <span id="ver" class="dim">v—</span>
     <span id="link" class="link ok">● UPLINK</span>
   </footer>
+</section>
+
+<!-- ============ TERMINAL ============ -->
+<section id="term" class="term-screen hidden">
+  <div class="term-top">
+    <span class="term-title">&gt;_ ROOT@<span id="termHost">SERVER</span></span>
+    <span id="termState" class="term-state">OFFLINE</span>
+    <button id="termReconnect" class="ghost small hidden">↻</button>
+    <button id="closeTerm" class="ghost small">✕ TUTUP</button>
+  </div>
+  <div id="termBox" class="term-box"></div>
+  <div class="keys" id="keys">
+    <button data-k="esc">ESC</button><button data-k="tab">TAB</button><button data-k="ctrl" id="ctrlKey">CTRL</button>
+    <button data-k="up">↑</button><button data-k="down">↓</button><button data-k="left">←</button><button data-k="right">→</button>
+    <button data-k="|">|</button><button data-k="/">/</button><button data-k="-">-</button><button data-k="~">~</button>
+    <button data-k="ctrlc">^C</button><button data-k="paste">PASTE</button>
+  </div>
 </section>
 
 <script src="/app.js"></script>

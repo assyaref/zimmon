@@ -4,8 +4,15 @@
 Runs as root (needs `su - zimbra` for zmcontrol/postqueue and read access to logs).
 Every command is a fixed string; no user input ever reaches a shell.
 """
+import base64
+import fcntl
 import hashlib
 import hmac
+import pty
+import select
+import signal
+import struct
+import termios
 import http.server
 import json
 import os
@@ -39,7 +46,17 @@ STATIC_FILES = {
     "/sw.js": ("sw.js", "application/javascript; charset=utf-8"),
     "/icon-192.png": ("icon-192.png", "image/png"),
     "/icon-512.png": ("icon-512.png", "image/png"),
+    "/vendor/xterm.js": ("vendor/xterm.js", "application/javascript; charset=utf-8"),
+    "/vendor/xterm.css": ("vendor/xterm.css", "text/css; charset=utf-8"),
 }
+
+# Web terminal (root shell). Disable with "terminal": false in /etc/zimmon/config.json
+TERMINAL_ON = CONF.get("terminal", True) is not False
+TERM_IDLE = int(CONF.get("terminal_idle_min", 30)) * 60
+TERM_MAX = 3
+TERM_LOG = "/var/log/zimmon-terminal.log"
+TERM_COUNT = [0]
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 PORTS = [
     (25, "SMTP"), (465, "SMTPS"), (587, "SUBMIT"), (143, "IMAP"), (993, "IMAPS"),
@@ -262,10 +279,125 @@ def locked(ip):
     return len(FAILS[ip]) >= MAX_FAILS
 
 
+# ---------------------------------------------------------------- websocket terminal
+def term_log(msg):
+    try:
+        with open(TERM_LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except Exception:
+        pass
+
+
+def recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("closed")
+        buf += chunk
+    return buf
+
+
+def ws_recv(sock):
+    b1, b2 = recv_exact(sock, 2)
+    op, ln = b1 & 0x0F, b2 & 0x7F
+    if ln == 126:
+        ln = struct.unpack(">H", recv_exact(sock, 2))[0]
+    elif ln == 127:
+        ln = struct.unpack(">Q", recv_exact(sock, 8))[0]
+    if ln > 1 << 20:
+        raise ConnectionError("frame too large")
+    mask = recv_exact(sock, 4) if b2 & 0x80 else b""
+    data = recv_exact(sock, ln) if ln else b""
+    if mask and data:
+        m = (mask * (ln // 4 + 1))[:ln]
+        data = (int.from_bytes(data, "big") ^ int.from_bytes(m, "big")).to_bytes(ln, "big")
+    return op, data
+
+
+def ws_send(sock, op, data=b""):
+    ln = len(data)
+    if ln < 126:
+        head = struct.pack(">BB", 0x80 | op, ln)
+    elif ln < 65536:
+        head = struct.pack(">BBH", 0x80 | op, 126, ln)
+    else:
+        head = struct.pack(">BBQ", 0x80 | op, 127, ln)
+    sock.sendall(head + data)
+
+
+def run_terminal(sock, ip):
+    """Bridge a websocket to a root login shell on a pty. Single thread (SSL objects are not thread-safe)."""
+    pid, fd = pty.fork()
+    if pid == 0:  # child: never return into the server code
+        try:
+            os.chdir("/root")
+            env = {"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root",
+                   "SHELL": "/bin/bash", "LANG": "C.UTF-8",
+                   "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+            os.execve("/bin/bash", ["bash", "-l"], env)
+        finally:
+            os._exit(1)
+    term_log(f"OPEN  ip={ip} pid={pid}")
+    started = last = time.time()
+    reason = "closed"
+    try:
+        while True:
+            ready = select.select([sock, fd], [], [], 20)[0]
+            if sock.pending() or sock in ready:
+                op, data = ws_recv(sock)
+                last = time.time()
+                if op == 0x8:  # close
+                    break
+                if op == 0x9:  # ping
+                    ws_send(sock, 0xA, data)
+                elif op in (0x1, 0x2) and data:
+                    kind, body = data[:1], data[1:]
+                    if kind == b"i":
+                        os.write(fd, body)
+                    elif kind == b"r":
+                        size = json.loads(body)
+                        rows, cols = max(1, min(int(size["r"]), 500)), max(1, min(int(size["c"]), 500))
+                        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+            if fd in ready:
+                try:
+                    out = os.read(fd, 65536)
+                except OSError:
+                    out = b""
+                if not out:
+                    reason = "shell exited"
+                    break
+                ws_send(sock, 0x2, out)
+            if time.time() - last > TERM_IDLE:
+                ws_send(sock, 0x2, f"\r\n\x1b[33m[ZIMMON] Sesi ditutup: tidak aktif {TERM_IDLE // 60} menit.\x1b[0m\r\n".encode())
+                reason = "idle timeout"
+                break
+    except Exception as e:
+        reason = f"error {type(e).__name__}"
+    finally:
+        try:
+            ws_send(sock, 0x8, struct.pack(">H", 1000))
+        except Exception:
+            pass
+        try:
+            os.kill(pid, signal.SIGHUP)
+            time.sleep(0.2)
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except Exception:
+            pass
+        os.close(fd)
+        term_log(f"CLOSE ip={ip} pid={pid} dur={int(time.time() - started)}s reason={reason}")
+
+
 # ---------------------------------------------------------------- http
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "ZIMMON"
     sys_version = ""
+    protocol_version = "HTTP/1.1"  # required for the websocket 101 response
     timeout = 20
 
     def setup(self):
@@ -281,7 +413,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
-                         "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+                         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
                          "script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 
     def send_json(self, code, obj, cookie=None):
@@ -317,7 +449,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = json.loads(json.dumps(STATE))
             return self.send_json(200, data)
         if path == "/api/session":
-            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION})
+            return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
+        if path == "/api/term":
+            return self.open_terminal()
         if path in STATIC_FILES:
             name, ctype = STATIC_FILES[path]
             try:
@@ -336,6 +470,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         self.send_json(404, {"error": "not found"})
+
+    def open_terminal(self):
+        if not TERMINAL_ON:
+            return self.send_json(403, {"error": "terminal disabled"})
+        if not self.session():
+            return self.send_json(401, {"error": "unauthorized"})
+        # block cross-site websocket hijacking: the page must come from this same origin
+        if self.headers.get("Origin", "") != "https://" + self.headers.get("Host", "-"):
+            return self.send_json(403, {"error": "bad origin"})
+        key = self.headers.get("Sec-WebSocket-Key")
+        if self.headers.get("Upgrade", "").lower() != "websocket" or not key:
+            return self.send_json(400, {"error": "websocket required"})
+        with LOCK:
+            if TERM_COUNT[0] >= TERM_MAX:
+                return self.send_json(429, {"error": "too many terminals"})
+            TERM_COUNT[0] += 1
+        try:
+            accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+            self.send_response(101)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            self.wfile.flush()
+            self.connection.settimeout(None)
+            run_terminal(self.connection, self.client_address[0])
+        finally:
+            with LOCK:
+                TERM_COUNT[0] -= 1
+            self.close_connection = True
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]

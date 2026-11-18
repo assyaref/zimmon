@@ -2,6 +2,8 @@
 
 Dashboard monitoring VPS Zimbra yang bisa diinstal di HP Android sebagai aplikasi (PWA). Bergaya ruang operasi intelijen. Hanya membaca data, tidak bisa mengubah apa pun di server.
 
+**Terminal:** tombol `>_ TERMINAL` membuka shell root langsung di aplikasi, dengan baris tombol ESC/TAB/CTRL/panah untuk keyboard HP. Siapa pun yang bisa login ke ZIMMON mendapat akses root, jadi pakai password yang kuat. Sesi tertutup otomatis setelah 30 menit tidak aktif, dan setiap sesi dicatat di `/var/log/zimmon-terminal.log`. Untuk mematikan terminal, tambahkan `"terminal": false` di `/etc/zimmon/config.json` lalu `systemctl restart zimmon`.
+
 **Yang dipantau:** status service Zimbra, CPU/RAM/disk/swap (+ grafik 10 menit), port, antrian email, jumlah akun, masa berlaku SSL, lalu lintas email, login gagal (brute-force), log peringatan, proses teratas.
 
 ## Instalasi pertama (di VPS, sebagai root)
@@ -51,6 +53,7 @@ Di HP, aplikasi menampilkan banner **UPDATE TERSEDIA** begitu server sudah diupd
 ```
 server.py      server HTTPS (Python stdlib, tanpa dependency)
 static/        aplikasi web: index.html, app.js, style.css, manifest, service worker, ikon
+static/vendor/ xterm.js (MIT) untuk terminal
 install.sh     instalasi pertama + systemd service
 update.sh      dipasang sebagai /usr/local/bin/zimmon-update
 VERSION        nomor versi

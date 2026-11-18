@@ -219,6 +219,97 @@
     });
   }
 
+  // ---------------- terminal ----------------
+  let term = null, fit = null, ws = null, ctrlOn = false;
+  const enc = new TextEncoder();
+
+  function loadXterm() {
+    if (window.XTermLib) return Promise.resolve();
+    return new Promise((ok, fail) => {
+      const css = document.createElement("link");
+      css.rel = "stylesheet"; css.href = "/vendor/xterm.css"; document.head.appendChild(css);
+      const s = document.createElement("script");
+      s.src = "/vendor/xterm.js"; s.onload = ok; s.onerror = fail; document.head.appendChild(s);
+    });
+  }
+
+  function setState(on, text) {
+    $("termState").className = "term-state" + (on ? " on" : "");
+    $("termState").textContent = text;
+    $("termReconnect").classList.toggle("hidden", on);
+  }
+
+  function send(kind, str) {
+    if (ws && ws.readyState === 1) ws.send(enc.encode(kind + str));
+  }
+
+  function sendResize() {
+    if (term) send("r", JSON.stringify({ c: term.cols, r: term.rows }));
+  }
+
+  function input(str) {
+    if (ctrlOn && str.length === 1) {
+      const c = str.toUpperCase().charCodeAt(0);
+      if (c >= 64 && c <= 95) str = String.fromCharCode(c - 64);
+      ctrlOn = false; $("ctrlKey").classList.remove("on");
+    }
+    send("i", str);
+  }
+
+  function connect() {
+    if (ws) { try { ws.close(); } catch {} }
+    setState(false, "CONNECTING…");
+    ws = new WebSocket(`wss://${location.host}/api/term`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { setState(true, "● LIVE"); fit.fit(); sendResize(); term.focus(); };
+    ws.onmessage = (e) => term.write(new Uint8Array(e.data));
+    ws.onclose = () => { setState(false, "DISCONNECTED"); term.write("\r\n\x1b[31m[ZIMMON] Koneksi terminal terputus. Ketuk ↻ untuk sambung lagi.\x1b[0m\r\n"); };
+  }
+
+  async function openTerm() {
+    try { await loadXterm(); } catch { alert("Gagal memuat terminal"); return; }
+    $("term").classList.remove("hidden");
+    $("termHost").textContent = $("host").textContent.toUpperCase();
+    if (!term) {
+      const { Terminal, FitAddon } = window.XTermLib;
+      term = new Terminal({
+        cursorBlink: true, fontSize: 13, scrollback: 3000,
+        fontFamily: 'ui-monospace, "Roboto Mono", "Courier New", monospace',
+        theme: { background: "#000000", foreground: "#c9f7e1", cursor: "#33ff99", selectionBackground: "#1fb87466",
+                 green: "#33ff99", brightGreen: "#7dffbf", red: "#ff3b3b", yellow: "#ffb000", blue: "#33ccff" },
+      });
+      fit = new FitAddon(); term.loadAddon(fit);
+      term.open($("termBox"));
+      term.onData(input);
+      term.onResize(sendResize);
+      window.addEventListener("resize", () => { if (!$("term").classList.contains("hidden")) fit.fit(); });
+    }
+    setTimeout(() => fit.fit(), 50);
+    if (!ws || ws.readyState > 1) connect();
+    term.focus();
+  }
+
+  const KEYS = { esc: "\x1b", tab: "\t", up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", ctrlc: "\x03" };
+  $("keys").addEventListener("click", async (e) => {
+    const k = e.target.dataset && e.target.dataset.k;
+    if (!k) return;
+    if (k === "ctrl") { ctrlOn = !ctrlOn; e.target.classList.toggle("on", ctrlOn); }
+    else if (k === "paste") { try { send("i", await navigator.clipboard.readText()); } catch {} }
+    else send("i", KEYS[k] || k);
+    term && term.focus();
+  });
+  $("openTerm").addEventListener("click", openTerm);
+  $("closeTerm").addEventListener("click", () => {
+    if (ws) { try { ws.close(); } catch {} ws = null; }
+    if (term) term.reset();
+    $("term").classList.add("hidden");
+  });
+  $("termReconnect").addEventListener("click", () => { term && term.reset(); connect(); });
+
   // ---------------- start ----------------
-  fetch("/api/session").then((r) => r.json()).then((j) => { checkVersion(j.version); j.ok ? showDash() : showLogin(); }).catch(showLogin);
+  fetch("/api/session").then((r) => r.json()).then((j) => {
+    checkVersion(j.version);
+    $("openTerm").classList.toggle("hidden", !j.terminal);
+    j.ok ? showDash() : showLogin();
+  }).catch(showLogin);
 })();

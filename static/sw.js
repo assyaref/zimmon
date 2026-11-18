@@ -1,6 +1,6 @@
 // App-shell cache only. API responses are never cached.
 const CACHE = "zimmon-__VERSION__";
-const SHELL = ["/", "/style.css", "/app.js", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const SHELL = ["/", "/style.css", "/app.js", "/manifest.json", "/icon-192.png", "/icon-512.png", "/vendor/xterm.js", "/vendor/xterm.css"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
