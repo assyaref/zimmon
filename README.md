@@ -1,8 +1,8 @@
 # ZIMMON — Zimbra Ops Center
 
-Dashboard monitoring VPS Zimbra yang bisa diinstal di HP Android sebagai aplikasi (PWA). Bergaya ruang operasi intelijen. Hanya membaca data, tidak bisa mengubah apa pun di server.
+Dashboard monitoring VPS Zimbra yang bisa diinstal di HP Android sebagai aplikasi (PWA). Bergaya ruang operasi intelijen. Pada dasarnya hanya membaca data; satu-satunya aksi yang mengubah server adalah tombol **BLOKIR IP** (lewat fail2ban) kalau fail2ban terpasang.
 
-**Deteksi serangan:** brute force (SMTP, webmail/IMAP/POP, SSH, ZIMMON), relay spam, bot, serangan aktif, akun yang kemungkinan dibobol, dan akun yang tiba-tiba mengirim email massal. Hanya mendeteksi, tidak memblokir. Setiap IP penyerang ditampilkan dengan ASN/operator jaringan dan negaranya (lookup ke `whois.cymru.com` port 43; matikan dengan `"asn_lookup": false` di `/etc/zimmon/config.json`).
+**Deteksi serangan:** brute force (SMTP, webmail/IMAP/POP, SSH, ZIMMON), relay spam, bot, serangan aktif, akun yang kemungkinan dibobol, dan akun yang tiba-tiba mengirim email massal. Tiap IP penyerang punya tombol **BLOKIR** yang memakai fail2ban untuk menolak IP itu di firewall (semua port, permanen); bisa dibuka lagi dari daftar **IP DIBLOKIR**. Setiap IP penyerang ditampilkan dengan ASN/operator jaringan dan negaranya (lookup ke `whois.cymru.com` port 43; matikan dengan `"asn_lookup": false` di `/etc/zimmon/config.json`).
 
 **Terminal:** tombol `>_ TERMINAL` membuka shell root langsung di aplikasi, dengan baris tombol ESC/TAB/CTRL/panah untuk keyboard HP. Siapa pun yang bisa login ke ZIMMON mendapat akses root, jadi pakai password yang kuat. Sesi tertutup otomatis setelah 30 menit tidak aktif, dan setiap sesi dicatat di `/var/log/zimmon-terminal.log`. Untuk mematikan terminal, tambahkan `"terminal": false` di `/etc/zimmon/config.json` lalu `systemctl restart zimmon`.
 
@@ -18,6 +18,18 @@ cd /root/zimmon && bash install.sh
 Installer meminta username dan password login. Password disimpan sebagai hash PBKDF2 di `/etc/zimmon/config.json` (tidak pernah masuk ke repo ini).
 
 Lalu di HP: buka `https://<host>:9443` di Chrome → menu ⋮ → **Install app**.
+
+## fail2ban (pemblokiran)
+
+Tombol BLOKIR butuh **fail2ban** di VPS. Saat `install.sh` pertama kali jalan, fail2ban otomatis dipasang dan dikonfigurasi. Untuk memasang/memperbaruinya kapan saja:
+
+```bash
+bash /opt/zimmon/install.sh --fail2ban
+```
+
+Ini membuat jail `zimmon-manual` (ban manual dari aplikasi, semua port, permanen), plus jail otomatis untuk brute force SSH dan SMTP AUTH Zimbra. ZIMMON memblokir dengan memanggil `fail2ban-client`; IP server dan `127.0.0.1` tidak pernah bisa diblokir dari aplikasi. Jail diatur di `/etc/fail2ban/jail.d/zimmon.local`.
+
+Di aplikasi, panel **FIREWALL (FAIL2BAN)** menampilkan status (AKTIF/MATI) dengan tombol **AKTIFKAN / MATIKAN**. Mematikan fail2ban menghapus semua blokir yang sedang aktif dan menghentikan pemblokiran otomatis, jadi tombol BLOKIR per-IP hanya muncul saat fail2ban sedang jalan.
 
 ## Update / upgrade
 
@@ -40,6 +52,7 @@ Perintah lain:
 | `zimmon-update --status` | Versi terpasang, repo, daftar backup |
 | `zimmon-update --rollback` | Kembali ke versi sebelumnya |
 | `bash /opt/zimmon/install.sh --reset-password` | Ganti username/password |
+| `bash /opt/zimmon/install.sh --fail2ban` | Pasang/atur ulang fail2ban |
 
 Di HP, aplikasi menampilkan banner **UPDATE TERSEDIA** begitu server sudah diupdate. Ketuk untuk memuat versi baru.
 
