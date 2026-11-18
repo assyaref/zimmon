@@ -7,6 +7,74 @@ DIR=/opt/zimmon
 PORT=9443
 HOST=$(su - zimbra -c "zmhostname" 2>/dev/null || hostname -f)
 
+setup_fail2ban() {
+  echo "== Memasang & mengatur fail2ban =="
+  if ! command -v fail2ban-client >/dev/null; then
+    if   command -v apt-get >/dev/null; then apt-get update -qq && apt-get install -y fail2ban
+    elif command -v dnf     >/dev/null; then dnf install -y fail2ban
+    elif command -v yum     >/dev/null; then yum install -y epel-release 2>/dev/null; yum install -y fail2ban
+    else echo "Tidak tahu package manager; pasang fail2ban manual lalu jalankan lagi."; return 1
+    fi
+  fi
+  # empty filter: a jail that never matches a log, only takes manual bans from ZIMMON
+  cat > /etc/fail2ban/filter.d/zimmon-empty.conf <<'F'
+[Definition]
+failregex =
+ignoreregex =
+F
+  # Zimbra SMTP AUTH brute force (pola sama dengan deteksi ZIMMON) — tak bergantung versi fail2ban
+  cat > /etc/fail2ban/filter.d/zimmon-smtp.conf <<'F'
+[Definition]
+failregex = \[<HOST>\]: SASL (?:LOGIN|PLAIN|(?:CRAM|DIGEST)-MD5) authentication failed
+ignoreregex =
+F
+  : > /var/log/zimmon-manual.log
+  cat > /etc/fail2ban/jail.d/zimmon.local <<'J'
+# Dikelola oleh ZIMMON. Jangan diedit manual; ubah lalu jalankan: bash /opt/zimmon/install.sh --fail2ban
+[DEFAULT]
+# jangan pernah blokir diri sendiri / jaringan lokal
+ignoreip = 127.0.0.1/8 ::1
+
+# Dipakai tombol BLOKIR di aplikasi ZIMMON. Ban permanen, semua port.
+[zimmon-manual]
+enabled   = true
+filter    = zimmon-empty
+backend   = polling
+logpath   = /var/log/zimmon-manual.log
+maxretry  = 100000
+findtime  = 1
+bantime   = -1
+banaction = %(banaction_allports)s
+
+# Brute force SSH
+[sshd]
+enabled  = true
+maxretry = 5
+bantime  = 3600
+
+# Brute force SMTP AUTH ke Zimbra (log Postfix Zimbra)
+[zimbra-smtp]
+enabled  = true
+filter   = zimmon-smtp
+logpath  = /var/log/zimbra.log
+port     = smtp,465,submission,imap,imaps,pop3,pop3s
+maxretry = 5
+findtime = 600
+bantime  = 3600
+J
+  systemctl enable fail2ban >/dev/null 2>&1
+  systemctl restart fail2ban
+  sleep 2
+  if fail2ban-client ping >/dev/null 2>&1; then
+    echo "fail2ban aktif. Jail: $(fail2ban-client status 2>/dev/null | grep 'Jail list' | cut -d: -f2)"
+  else
+    echo "fail2ban gagal start. Cek: fail2ban-client -t  dan  journalctl -u fail2ban -n 30"
+    return 1
+  fi
+}
+
+if [ "$1" = "--fail2ban" ]; then setup_fail2ban; exit $?; fi
+
 echo "== Memasang ZIMMON ke $DIR (host: $HOST, port: $PORT) =="
 mkdir -p "$DIR" /etc/zimmon
 tar -C "$SRC" --exclude=.git -cf - . | tar -C "$DIR" -xf -
@@ -41,6 +109,9 @@ PY
   chmod 600 /etc/zimmon/config.json
   echo "Password disimpan sebagai hash (PBKDF2), bukan teks asli."
 fi
+
+# pasang fail2ban (idempotent) supaya tombol BLOKIR di aplikasi langsung berfungsi
+setup_fail2ban || echo "Lewati fail2ban untuk sekarang; bisa diulang: bash $DIR/install.sh --fail2ban"
 
 cat > /etc/systemd/system/zimmon.service <<EOF
 [Unit]

@@ -1,5 +1,11 @@
 # ZIMMON changelog
 
+## 1.6.0 — 2026-11-18
+- **Tombol BLOKIR IP**: setiap IP penyerang bisa diblokir dari aplikasi (lewat fail2ban), dengan konfirmasi; ada daftar **IP DIBLOKIR** untuk membukanya lagi
+  - `install.sh` kini memasang & mengatur fail2ban otomatis (jail manual `zimmon-manual` + brute force SSH + SMTP AUTH Zimbra). Atur ulang kapan saja: `bash install.sh --fail2ban`
+  - Pengaman: IP server sendiri, perangkat pengakses, `127.0.0.1`, IP privat, dan IP tidak valid ditolak. Blokir memakai `fail2ban-client` (argumen tetap, bukan shell)
+  - Status fail2ban dan daftar IP yang diblokir ikut ditampilkan di aplikasi
+
 ## 1.5.0 — 2026-11-18
 - `install.sh --reset-password` tidak lagi menghapus pengaturan lain di `/etc/zimmon/config.json` (terminal, asn_lookup, dll.); sebelumnya seluruh file ditulis ulang
 

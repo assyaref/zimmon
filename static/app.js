@@ -134,6 +134,7 @@
     $("uptime").textContent = fmtUptime(s.uptime);
     const atk = s.attacks || {};
     $("sentToday").textContent = atk.sent_today !== undefined ? `${atk.sent_today} ✉` : "—";
+    renderFirewall(s.firewall || {});
     renderAttacks(atk);
 
     gauge("gCpu", s.cpu, `${s.cpu}% ·${s.cores}c`);
@@ -214,6 +215,35 @@
   const flag = (cc) => /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0))) + " " : "";
   const asnText = (x) => x ? `${flag(x.cc)}AS${x.asn} ${x.name}` : "";
 
+  let fw = {};
+  function renderFirewall(f) {
+    fw = f || {};
+    $("fwState").textContent = !fw.on ? "— fail2ban tidak aktif di server"
+      : (fw.blocked && fw.blocked.length ? `(${fw.blocked.length} IP · jail ${fw.jail})` : "(belum ada)");
+    $("fwList").innerHTML = (fw.blocked || []).map((ip) =>
+      `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}" target="_blank" rel="noopener noreferrer">${esc(ip)}</a>` +
+      `<button class="fw-btn open" data-unblock="${esc(ip)}">BUKA BLOKIR</button></div>`
+    ).join("") || (fw.on ? '<span class="dim">Belum ada IP yang diblokir.</span>' : "");
+  }
+
+  async function fwAction(ip, unblock) {
+    const r = await fetch(unblock ? "/api/unblock" : "/api/block", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) renderFirewall({ ...fw, blocked: j.blocked || [] });
+    else alert((unblock ? "Gagal buka blokir: " : "Gagal blokir: ") + (j.error || r.status));
+  }
+
+  // one delegated handler for every block / unblock button
+  $("atkPanel").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-block]");
+    const u = e.target.closest("button[data-unblock]");
+    if (b && confirm(`Blokir IP ${b.dataset.block} di firewall server? Semua koneksi dari IP ini akan ditolak.`)) fwAction(b.dataset.block, false);
+    if (u && confirm(`Buka blokir untuk ${u.dataset.unblock}?`)) fwAction(u.dataset.unblock, true);
+  });
+
   function renderAttacks(a) {
     if (!a.level) { $("atkLevel").textContent = "MEMINDAI…"; return; }
     $("atkLevel").className = "atk-level " + a.level;
@@ -236,8 +266,12 @@
     $("atkTimeline").querySelectorAll("i").forEach((el, i) => { el.style.height = Math.max(2, (tl[i] / max) * 100) + "%"; });
     $("atkTotals").textContent = `${a.total24} percobaan · ${a.unique_ips} IP`;
 
+    const bset = new Set(fw.blocked || []);
     $("atkTop").innerHTML = (a.top || []).map((x) =>
       `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(x.ip)}" target="_blank" rel="noopener noreferrer">${esc(x.ip)}</a><span class="n">${x.n}×</span>` +
+      (fw.on ? (bset.has(x.ip)
+        ? `<button class="fw-btn done" disabled>DIBLOKIR</button>`
+        : `<button class="fw-btn" data-block="${esc(x.ip)}">BLOKIR</button>`) : "") +
       `<span class="meta">${x.asn ? `<span class="asn">${esc(asnText(x.asn))}</span>` : ""}${x.recent >= 10 ? '<span class="live">● AKTIF · </span>' : ""}${esc(x.cats.join(", "))} · ${ago(x.last)}${x.who.length ? " · " + esc(x.who.join(", ")) : ""}</span></div>`
     ).join("") || '<span class="dim">Tidak ada percobaan serangan terdeteksi.</span>';
 

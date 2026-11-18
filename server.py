@@ -18,6 +18,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import ssl
 import subprocess
@@ -622,6 +623,65 @@ def locked(ip):
     return len(FAILS[ip]) >= MAX_FAILS
 
 
+
+# ---------------------------------------------------------------- firewall (block IPs via fail2ban)
+FW_JAIL = str(CONF.get("fail2ban_jail", "zimmon-manual"))
+F2B = shutil.which("fail2ban-client")   # None when fail2ban is not installed
+_BLOCK_CACHE = {"ts": 0.0, "ips": []}
+
+
+def own_ips():
+    ips = {"127.0.0.1", "::1", "0.0.0.0"}
+    try:
+        ips.update(subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5).stdout.split())
+    except Exception:
+        pass
+    try:
+        ips.add(socket.gethostbyname(HOST))
+    except Exception:
+        pass
+    return ips
+
+
+def valid_public_ip(ip):
+    try:
+        return ipaddress.ip_address(ip).is_global   # rejects private, loopback, link-local, multicast
+    except ValueError:
+        return False
+
+
+def _f2b(*args, timeout=15):
+    """Run fail2ban-client with fixed arguments (never a shell). Returns (code, out, err) or None."""
+    if not F2B:
+        return None
+    try:
+        r = subprocess.run([F2B, *args], capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return -1, "", str(e)
+
+
+def blocked_ips(max_age=5):
+    now = time.time()
+    if now - _BLOCK_CACHE["ts"] < max_age:
+        return _BLOCK_CACHE["ips"]
+    r = _f2b("get", FW_JAIL, "banip")
+    ips = [x for x in r[1].replace("\n", " ").split() if x] if r and r[0] == 0 else []
+    _BLOCK_CACHE.update(ts=now, ips=ips)
+    return ips
+
+
+def set_block(ip, unblock=False):
+    r = _f2b("set", FW_JAIL, "unbanip" if unblock else "banip", ip)
+    if r is None:
+        return False, "fail2ban belum terpasang di server"
+    code, out, err = r
+    _BLOCK_CACHE["ts"] = 0.0   # force refresh on next read
+    if code == 0:
+        return True, ""
+    return False, (err or out or "gagal")[:200]
+
+
 # ---------------------------------------------------------------- websocket terminal
 def term_log(msg):
     try:
@@ -791,6 +851,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with LOCK:
                 data = json.loads(json.dumps(STATE))
             data["attacks"] = DET.snapshot() if DET else {}
+            data["firewall"] = {"on": bool(F2B), "jail": FW_JAIL, "blocked": blocked_ips()}
             return self.send_json(200, data)
         if path == "/api/session":
             return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
@@ -876,6 +937,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if sid:
                 SESSIONS.pop(sid, None)
             return self.send_json(200, {"ok": True}, "zm_sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+        if path in ("/api/block", "/api/unblock"):
+            if not self.session():
+                return self.send_json(401, {"error": "unauthorized"})
+            try:
+                n = min(int(self.headers.get("Content-Length", 0)), 256)
+                target = str(json.loads(self.rfile.read(n) or b"{}").get("ip", ""))[:64].strip()
+            except Exception:
+                return self.send_json(400, {"error": "bad request"})
+            if not valid_public_ip(target):
+                return self.send_json(400, {"error": "IP tidak valid atau bukan IP publik"})
+            if path == "/api/block" and (target == ip or target in own_ips()):
+                return self.send_json(400, {"error": "Menolak memblokir IP server atau perangkat Anda sendiri"})
+            ok, msg = set_block(target, unblock=(path == "/api/unblock"))
+            if ok:
+                print(f"firewall: {'UNBLOCK' if path == '/api/unblock' else 'BLOCK'} {target} from {ip}", flush=True)
+                return self.send_json(200, {"ok": True, "blocked": blocked_ips(max_age=0)})
+            return self.send_json(503 if "belum terpasang" in msg else 500, {"error": msg})
         self.send_json(404, {"error": "not found"})
 
 

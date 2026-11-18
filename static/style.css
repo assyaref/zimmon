@@ -155,6 +155,15 @@ button{font:inherit;cursor:pointer}
 .atk-row .meta{grid-column:1 / -1;font-size:10px;color:var(--dim)}
 .atk-row .live{color:var(--red);font-weight:700}
 .atk-row .asn{display:block;color:var(--g2);margin-bottom:1px}
+.fw-btn{border:1px solid var(--amber);background:transparent;color:var(--amber);font:inherit;font-size:10px;letter-spacing:.1em;padding:3px 8px;cursor:pointer;white-space:nowrap}
+.fw-btn:hover{background:var(--amber);color:#1a1200}
+.fw-btn.done{border-color:var(--red);color:var(--red);opacity:.75;cursor:default}
+.fw-btn.open{border-color:var(--g2);color:var(--g2)}
+.fw-btn.open:hover{background:var(--g2);color:#00140b}
+#atkTop .atk-row{grid-template-columns:1fr auto auto}
+#atkTop .atk-row .n{grid-column:3}
+#atkTop .fw-btn{grid-column:2;align-self:center}
+
 
 /* ---------- terminal ---------- */
 .actions{display:flex;gap:6px}
