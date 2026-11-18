@@ -95,7 +95,6 @@
   setInterval(() => {
     const d = new Date();
     $("clkLocal").textContent = d.toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
-    $("clkZulu").textContent = d.toISOString().substring(11, 19) + "Z";
   }, 1000);
 
   // ---------------- data ----------------
@@ -133,6 +132,7 @@
     $("host").textContent = s.host;
     checkVersion(s.version);
     $("uptime").textContent = fmtUptime(s.uptime);
+    $("sentToday").textContent = s.today && s.today.sent !== undefined ? `${s.today.sent} ✉` : "—";
 
     gauge("gCpu", s.cpu, `${s.cpu}% ·${s.cores}c`);
     gauge("gMem", s.mem.pct, `${gb(s.mem.used)}/${gb(s.mem.total)}`);

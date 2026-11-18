@@ -242,6 +242,21 @@ def slow_loop():
                 "window": (lines[0][:15] + " → " + lines[-1][:15]) if lines else "",
             }
 
+            # today's totals: one streaming pass over the whole log (handles both syslog date formats)
+            today = {"sent": 0, "authfail": 0}
+            prefixes = (time.strftime("%b %e "), time.strftime("%Y-%m-%d"))
+            try:
+                if os.path.getsize("/var/log/zimbra.log") < 1_500_000_000:
+                    with open("/var/log/zimbra.log", errors="replace") as f:
+                        for l in f:
+                            if l.startswith(prefixes):
+                                if "status=sent" in l:
+                                    today["sent"] += 1
+                                elif "authentication failed" in l:
+                                    today["authfail"] += 1
+            except Exception:
+                today = {}
+
             procs = []
             for line in run(["ps", "-eo", "pid,user,pcpu,pmem,comm", "--sort=-pcpu"]).splitlines()[1:9]:
                 f = line.split(None, 4)
@@ -255,7 +270,7 @@ def slow_loop():
 
             with LOCK:
                 STATE.update({"services": services, "svc_ts": int(time.time()), "queue": queue,
-                              "cert": cert, "alerts": alerts, "mail": mail, "procs": procs})
+                              "cert": cert, "alerts": alerts, "mail": mail, "procs": procs, "today": today})
                 if accounts is not None:
                     STATE["accounts"] = accounts
         except Exception as e:
