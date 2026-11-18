@@ -2,6 +2,8 @@
 
 Dashboard monitoring VPS Zimbra yang bisa diinstal di HP Android sebagai aplikasi (PWA). Bergaya ruang operasi intelijen. Hanya membaca data, tidak bisa mengubah apa pun di server.
 
+**Deteksi serangan:** brute force (SMTP, webmail/IMAP/POP, SSH, ZIMMON), relay spam, bot, serangan aktif, akun yang kemungkinan dibobol, dan akun yang tiba-tiba mengirim email massal. Hanya mendeteksi, tidak memblokir.
+
 **Terminal:** tombol `>_ TERMINAL` membuka shell root langsung di aplikasi, dengan baris tombol ESC/TAB/CTRL/panah untuk keyboard HP. Siapa pun yang bisa login ke ZIMMON mendapat akses root, jadi pakai password yang kuat. Sesi tertutup otomatis setelah 30 menit tidak aktif, dan setiap sesi dicatat di `/var/log/zimmon-terminal.log`. Untuk mematikan terminal, tambahkan `"terminal": false` di `/etc/zimmon/config.json` lalu `systemctl restart zimmon`.
 
 **Yang dipantau:** status service Zimbra, CPU/RAM/disk/swap (+ grafik 10 menit), port, antrian email, jumlah akun, masa berlaku SSL, lalu lintas email, login gagal (brute-force), log peringatan, proses teratas.

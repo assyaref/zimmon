@@ -132,7 +132,9 @@
     $("host").textContent = s.host;
     checkVersion(s.version);
     $("uptime").textContent = fmtUptime(s.uptime);
-    $("sentToday").textContent = s.today && s.today.sent !== undefined ? `${s.today.sent} ✉` : "—";
+    const atk = s.attacks || {};
+    $("sentToday").textContent = atk.sent_today !== undefined ? `${atk.sent_today} ✉` : "—";
+    renderAttacks(atk);
 
     gauge("gCpu", s.cpu, `${s.cpu}% ·${s.cores}c`);
     gauge("gMem", s.mem.pct, `${gb(s.mem.used)}/${gb(s.mem.total)}`);
@@ -150,7 +152,9 @@
     if (portsDown.length) warn.push(`${portsDown.length} PORT CLOSED`);
     if (s.queue !== null && s.queue >= 100) crit.push(`QUEUE ${s.queue}`); else if (s.queue >= 20) warn.push(`QUEUE ${s.queue}`);
     if (s.cert && s.cert.days < 7) crit.push(`CERT ${s.cert.days}D`); else if (s.cert && s.cert.days < 21) warn.push(`CERT ${s.cert.days}D`);
-    if (s.mail && s.mail.authfail >= 50) warn.push(`${s.mail.authfail} AUTH FAILS`);
+    if (atk.breaches && atk.breaches.length) crit.push("AKUN MUNGKIN DIBOBOL");
+    if (atk.suspicious && atk.suspicious.length) crit.push("AKUN KIRIM SPAM");
+    if (atk.active && atk.active.length) warn.push(`${atk.active.length} SERANGAN AKTIF`);
     const t = $("threat");
     if (crit.length) { t.className = "threat crit"; $("threatVal").textContent = "CRITICAL"; }
     else if (warn.length) { t.className = "threat elev"; $("threatVal").textContent = "ELEVATED"; }
@@ -199,6 +203,42 @@
     $("procs").innerHTML = (s.procs || []).map((p) =>
       `<tr><td>${esc(p.pid)}</td><td>${esc(p.user)}</td><td>${esc(p.cpu)}</td><td>${esc(p.mem)}</td><td>${esc(p.cmd)}</td></tr>`).join("");
     $("last").textContent = "LAST INTERCEPT: " + new Date(s.ts * 1000).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta" });
+  }
+
+  const ago = (ts) => {
+    const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+    return m < 60 ? `${m} mnt lalu` : `${Math.floor(m / 60)} jam lalu`;
+  };
+
+  function renderAttacks(a) {
+    if (!a.level) { $("atkLevel").textContent = "MEMINDAI…"; return; }
+    $("atkLevel").className = "atk-level " + a.level;
+    $("atkLevel").textContent = { CLEAR: "AMAN", LOW: "RENDAH", ELEVATED: "WASPADA", HIGH: "TINGGI", CRITICAL: "KRITIS" }[a.level] || a.level;
+
+    const alerts = [];
+    (a.breaches || []).forEach((b) => alerts.push(
+      `<div class="atk-alert"><b>⚠ KEMUNGKINAN AKUN DIBOBOL</b>IP ${esc(b.ip)} gagal login ${b.fails}× lalu BERHASIL masuk sebagai <b>${esc(b.account)}</b> (${ago(b.ts)}). Segera ganti password akun ini.</div>`));
+    (a.suspicious || []).forEach((x) => alerts.push(
+      `<div class="atk-alert"><b>⚠ AKUN MENGIRIM EMAIL MASSAL</b><b>${esc(x.account)}</b> mengirim ${x.per_hour} email dalam 1 jam terakhir. Kemungkinan dipakai spammer: cek akun dan ganti passwordnya.</div>`));
+    (a.active || []).forEach((x) => alerts.push(
+      `<div class="atk-alert warn"><b>● SERANGAN AKTIF</b>IP ${esc(x.ip)}: ${x.recent} percobaan dalam 15 menit (${esc(x.cats.join(", "))})${x.who.length ? " · target: " + esc(x.who.join(", ")) : ""}</div>`));
+    $("atkAlerts").innerHTML = alerts.join("");
+
+    $("atkCats").innerHTML = (a.categories || []).map((c) =>
+      `<div class="atk-cat ${c.h1 >= 20 ? "fire" : c.h24 ? "hot" : ""}"><span>${esc(c.label)}</span><b>${c.h24}</b> <i>· ${c.h1}/jam</i></div>`).join("");
+
+    const tl = a.timeline || [], max = Math.max(1, ...tl);
+    $("atkTimeline").innerHTML = tl.map((v) => `<i class="${v ? "" : "zero"}" title="${v}"></i>`).join("");
+    $("atkTimeline").querySelectorAll("i").forEach((el, i) => { el.style.height = Math.max(2, (tl[i] / max) * 100) + "%"; });
+    $("atkTotals").textContent = `${a.total24} percobaan · ${a.unique_ips} IP`;
+
+    $("atkTop").innerHTML = (a.top || []).map((x) =>
+      `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(x.ip)}" target="_blank" rel="noopener noreferrer">${esc(x.ip)}</a><span class="n">${x.n}×</span>` +
+      `<span class="meta">${x.recent >= 10 ? '<span class="live">● AKTIF · </span>' : ""}${esc(x.cats.join(", "))} · ${ago(x.last)}${x.who.length ? " · " + esc(x.who.join(", ")) : ""}</span></div>`
+    ).join("") || '<span class="dim">Tidak ada percobaan serangan terdeteksi.</span>';
+
+    $("atkTargets").innerHTML = (a.targets || []).map((t) => `<span class="chip bad">${esc(t.account)} · ${t.n}×</span>`).join("") ||
+      '<span class="dim">Belum ada akun yang diincar.</span>';
   }
 
   function spark(hist) {

@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 import calendar
+import collections
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
@@ -242,21 +243,6 @@ def slow_loop():
                 "window": (lines[0][:15] + " → " + lines[-1][:15]) if lines else "",
             }
 
-            # today's totals: one streaming pass over the whole log (handles both syslog date formats)
-            today = {"sent": 0, "authfail": 0}
-            prefixes = (time.strftime("%b %e "), time.strftime("%Y-%m-%d"))
-            try:
-                if os.path.getsize("/var/log/zimbra.log") < 1_500_000_000:
-                    with open("/var/log/zimbra.log", errors="replace") as f:
-                        for l in f:
-                            if l.startswith(prefixes):
-                                if "status=sent" in l:
-                                    today["sent"] += 1
-                                elif "authentication failed" in l:
-                                    today["authfail"] += 1
-            except Exception:
-                today = {}
-
             procs = []
             for line in run(["ps", "-eo", "pid,user,pcpu,pmem,comm", "--sort=-pcpu"]).splitlines()[1:9]:
                 f = line.split(None, 4)
@@ -270,13 +256,260 @@ def slow_loop():
 
             with LOCK:
                 STATE.update({"services": services, "svc_ts": int(time.time()), "queue": queue,
-                              "cert": cert, "alerts": alerts, "mail": mail, "procs": procs, "today": today})
+                              "cert": cert, "alerts": alerts, "mail": mail, "procs": procs})
                 if accounts is not None:
                     STATE["accounts"] = accounts
         except Exception as e:
             print("slow_loop:", e, flush=True)
         n += 1
         time.sleep(60)
+
+
+# ---------------------------------------------------------------- attack detection
+WINDOW = 24 * 3600
+ACTIVE_WINDOW = 15 * 60
+ACTIVE_MIN = 10          # failures from one IP within 15 min = active brute force
+BREACH_MIN_FAILS = 5     # an IP with this many failures that then logs in = possible breach
+MAX_EVENTS = 300_000
+
+IP = r"([0-9a-fA-F:.]+)"
+SSHD = r"sshd(?:-session)?\[\d+\]: "
+RULES = [
+    # (log key, category, regex, group of ip, group of target account or None)
+    ("zimbra", "smtp", re.compile(r"\[" + IP + r"\]: SASL \S+ authentication failed"), 1, None),
+    ("zimbra", "relay", re.compile(r"NOQUEUE: reject: RCPT from \S*\[" + IP + r"\].*Relay access denied"), 1, None),
+    ("zimbra", "bot", re.compile(r"postscreen\[\d+\]: (?:PREGREET|DNSBL rank|BARE NEWLINE|COMMAND PIPELINING|NON-SMTP COMMAND)\b.*?\[" + IP + r"\]"), 1, None),
+    ("auth", "ssh", re.compile(SSHD + r"Failed (?:password|publickey) for (?:invalid user )?(\S+) from " + IP), 2, 1),
+    ("auth", "ssh", re.compile(SSHD + r"Invalid user (\S*) from " + IP), 2, 1),
+]
+SUBMIT_RE = re.compile(r"client=\S*\[" + IP + r"\], sasl_method=\S+, sasl_username=(\S+)")
+AUDIT_RE = re.compile(r"cmd=(?:Admin)?Auth; account=([^;]*);(?:.*?protocol=(\w+);)?")
+AUDIT_IP_RE = re.compile(r"oip=" + IP + r"[;\]]")
+AUDIT_IP2_RE = re.compile(r"\[ip=" + IP + r"[;\]]")
+SSH_OK_RE = re.compile(SSHD + r"Accepted \S+ for (\S+) from " + IP)
+
+CATEGORIES = {
+    "smtp": "SMTP AUTH", "mailauth": "WEBMAIL/IMAP/POP", "ssh": "SSH",
+    "relay": "RELAY SPAM", "bot": "BOT/SPAMMER", "zimmon": "ZIMMON LOGIN",
+}
+
+
+def _parse_ts(line, now):
+    try:
+        if line[:4].isdigit():  # 2026-11-19 01:00:00 / 2026-11-19T01:00:00
+            return time.mktime(time.strptime(line[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))
+        t = time.mktime(time.strptime(time.strftime("%Y") + " " + line[:15], "%Y %b %d %H:%M:%S"))
+        if t > now + 86400:  # December log read in January
+            t = time.mktime(time.strptime(str(int(time.strftime("%Y")) - 1) + " " + line[:15], "%Y %b %d %H:%M:%S"))
+        return t
+    except Exception:
+        return None
+
+
+class LogTail:
+    """Returns only lines appended since the previous call; survives rotation."""
+
+    def __init__(self, path, bootstrap=150_000_000):
+        self.path, self.boot, self.ino, self.pos = path, bootstrap, None, 0
+
+    def read(self):
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return []
+        lines = []
+        skip_first = False
+        if self.ino is None:  # first run: also read the previous rotated file
+            self.ino = st.st_ino
+            self.pos = max(0, st.st_size - self.boot)
+            skip_first = self.pos > 0
+            if self.pos == 0 and os.path.exists(self.path + ".1"):
+                lines += self._chunk(self.path + ".1", max(0, os.path.getsize(self.path + ".1") - self.boot), True)[0]
+        elif st.st_ino != self.ino or st.st_size < self.pos:  # rotated
+            self.ino, self.pos = st.st_ino, 0
+        if st.st_size > self.pos:
+            new, used = self._chunk(self.path, self.pos, skip_first)
+            self.pos += used
+            lines += new
+        return lines
+
+    @staticmethod
+    def _chunk(path, pos, skip_first):
+        with open(path, "rb") as f:
+            f.seek(pos)
+            data = f.read(300_000_000)
+        cut = data.rfind(b"\n") + 1
+        lines = data[:cut].decode("utf-8", "replace").splitlines()
+        return (lines[1:] if skip_first else lines), cut
+
+
+class Detector:
+    def __init__(self, host, suspect_send_per_hour=150):
+        self.host = host
+        self.suspect = suspect_send_per_hour
+        self.lock = threading.Lock()
+        self.events = collections.deque(maxlen=MAX_EVENTS)  # (ts, cat, ip, who)
+        self.sent_by_day = collections.Counter()
+        self.tails = {
+            "zimbra": LogTail("/var/log/zimbra.log"),
+            "audit": LogTail("/opt/zimbra/log/audit.log"),
+            "auth": LogTail("/var/log/auth.log"),
+        }
+        self.own = {"127.0.0.1", "::1"}
+        try:
+            self.own.update(subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5).stdout.split())
+            self.own.add(socket.gethostbyname(host))
+        except Exception:
+            pass
+        self.result = {}
+
+    def record(self, cat, ip, who=""):
+        """Called by the web server for ZIMMON's own failed logins."""
+        with self.lock:
+            self.events.append((time.time(), cat, ip, who))
+
+    # ------------------------------------------------------------ scanning
+    def scan(self):
+        now = time.time()
+        new = []
+        for key, tail in self.tails.items():
+            for line in tail.read():
+                self._line(key, line, now, new)
+        with self.lock:
+            self.events.extend(new)
+            while self.events and self.events[0][0] < now - WINDOW:
+                self.events.popleft()
+            self.result = self._analyze(now)
+
+    def _line(self, key, line, now, out):
+        if key == "zimbra":
+            if "status=sent" in line:
+                ts = _parse_ts(line, now)
+                if ts:
+                    self.sent_by_day[time.strftime("%Y-%m-%d", time.localtime(ts))] += 1
+                return
+            if "sasl_username=" in line:
+                m = SUBMIT_RE.search(line)
+                ts = m and _parse_ts(line, now)
+                if ts:
+                    out.append((ts, "submit", m.group(1), m.group(2)))
+                return
+        if key == "audit":
+            if "cmd=Auth" not in line and "cmd=AdminAuth" not in line:
+                return
+            m = AUDIT_RE.search(line)
+            ipm = AUDIT_IP_RE.search(line) or AUDIT_IP2_RE.search(line)
+            ts = _parse_ts(line, now)
+            if m and ipm and ts:
+                cat = "mailauth" if "error=" in line else "ok"
+                out.append((ts, cat, ipm.group(1), (m.group(1) or "?") + ("/" + m.group(2) if m.group(2) else "")))
+            return
+        if key == "auth" and "Accepted" in line:
+            m = SSH_OK_RE.search(line)
+            ts = m and _parse_ts(line, now)
+            if ts:
+                out.append((ts, "ok", m.group(2), m.group(1) + "/ssh"))
+            return
+        for log, cat, rx, ip_g, who_g in RULES:
+            if log != key:
+                continue
+            m = rx.search(line)
+            if m:
+                ts = _parse_ts(line, now)
+                if ts:
+                    out.append((ts, cat, m.group(ip_g), m.group(who_g) if who_g else ""))
+                return
+
+    # ------------------------------------------------------------ analysis
+    def _analyze(self, now):
+        c24 = collections.Counter()
+        c1 = collections.Counter()
+        timeline = [0] * 24
+        ips = {}
+        targets = collections.Counter()
+        submits = collections.Counter()
+        oks = []
+        for ts, cat, ip, who in self.events:
+            if cat == "submit":
+                if ts >= now - 3600:
+                    submits[who] += 1
+                if ip not in self.own:
+                    oks.append((ts, ip, who + "/smtp"))
+                continue
+            if cat == "ok":
+                if ip not in self.own:
+                    oks.append((ts, ip, who))
+                continue
+            if ip in self.own:
+                continue
+            c24[cat] += 1
+            if ts >= now - 3600:
+                c1[cat] += 1
+            h = int((now - ts) // 3600)
+            if 0 <= h < 24:
+                timeline[23 - h] += 1
+            d = ips.setdefault(ip, {"ip": ip, "n": 0, "recent": 0, "cats": collections.Counter(), "last": 0, "who": collections.Counter()})
+            d["n"] += 1
+            d["cats"][cat] += 1
+            d["last"] = max(d["last"], ts)
+            if ts >= now - ACTIVE_WINDOW:
+                d["recent"] += 1
+            if who:
+                d["who"][who] += 1
+                targets[who.split("/")[0]] += 1
+
+        active = sorted((d for d in ips.values() if d["recent"] >= ACTIVE_MIN), key=lambda d: -d["recent"])
+        breaches = []
+        seen = set()
+        for ts, ip, who in oks:
+            d = ips.get(ip)
+            if d and d["n"] >= BREACH_MIN_FAILS and (ip, who) not in seen:
+                seen.add((ip, who))
+                breaches.append({"ip": ip, "account": who, "fails": d["n"], "ts": int(ts)})
+        suspicious = [{"account": u, "per_hour": n} for u, n in submits.most_common() if n >= self.suspect]
+
+        total24, total1 = sum(c24.values()), sum(c1.values())
+        if breaches or suspicious:
+            level = "CRITICAL"
+        elif active:
+            level = "HIGH"
+        elif total1 >= 50:
+            level = "ELEVATED"
+        elif total24:
+            level = "LOW"
+        else:
+            level = "CLEAR"
+
+        def ip_row(d):
+            return {"ip": d["ip"], "n": d["n"], "recent": d["recent"], "last": int(d["last"]),
+                    "cats": [CATEGORIES.get(c, c) for c, _ in d["cats"].most_common()],
+                    "who": [w for w, _ in d["who"].most_common(3)]}
+
+        return {
+            "level": level,
+            "categories": [{"key": k, "label": v, "h24": c24[k], "h1": c1[k]} for k, v in CATEGORIES.items()],
+            "total24": total24, "total1": total1, "unique_ips": len(ips),
+            "timeline": timeline,
+            "active": [ip_row(d) for d in active[:10]],
+            "top": [ip_row(d) for d in sorted(ips.values(), key=lambda d: -d["n"])[:15]],
+            "targets": [{"account": a, "n": n} for a, n in targets.most_common(8)],
+            "breaches": breaches[:10],
+            "suspicious": suspicious[:10],
+            "sent_today": self.sent_by_day[time.strftime("%Y-%m-%d")],
+            "ts": int(now),
+        }
+
+    def loop(self, interval=30):
+        while True:
+            try:
+                self.scan()
+            except Exception as e:
+                print("attacks:", e, flush=True)
+            time.sleep(interval)
+
+    def snapshot(self):
+        with self.lock:
+            return self.result
 
 
 # ---------------------------------------------------------------- auth
@@ -462,6 +695,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(401, {"error": "unauthorized"})
             with LOCK:
                 data = json.loads(json.dumps(STATE))
+            data["attacks"] = DET.snapshot() if DET else {}
             return self.send_json(200, data)
         if path == "/api/session":
             return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
@@ -537,6 +771,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 cookie = f"zm_sid={sid}; Path=/; Max-Age={SESSION_TTL}; HttpOnly; Secure; SameSite=Strict"
                 return self.send_json(200, {"ok": True}, cookie)
             FAILS.setdefault(ip, []).append(time.time())
+            if DET:
+                DET.record("zimmon", ip, user[:64])
             time.sleep(1)
             left = max(0, MAX_FAILS - len(FAILS[ip]))
             return self.send_json(401, {"error": "denied", "left": left})
@@ -555,7 +791,13 @@ class Server(http.server.ThreadingHTTPServer):
         pass  # TLS handshake noise from scanners
 
 
+DET = None
+
+
 def main():
+    global DET
+    DET = Detector(HOST, int(CONF.get("suspect_send_per_hour", 150)))
+    threading.Thread(target=DET.loop, daemon=True).start()
     threading.Thread(target=fast_loop, daemon=True).start()
     threading.Thread(target=slow_loop, daemon=True).start()
     crt, key = cert_files()

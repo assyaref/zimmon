@@ -54,8 +54,8 @@ install_from() {
   echo "== Update ZIMMON: v$old → v$new =="
   b=$(backup); echo "Backup: $b"
   rm -rf "$DIR.new"; mkdir -p "$DIR.new"
-  cp -r "$src/server.py" "$src/static" "$src/VERSION" "$DIR.new/"
-  for f in CHANGELOG.md update.sh install.sh; do [ -f "$src/$f" ] && cp "$src/$f" "$DIR.new/"; done
+  # copy every file of the release (except git metadata) so new modules are never missed
+  tar -C "$src" --exclude=.git -cf - . | tar -C "$DIR.new" -xf -
   rm -rf "$DIR"; mv "$DIR.new" "$DIR"; chmod 700 "$DIR"
   systemctl restart zimmon
   if health; then

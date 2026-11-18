@@ -9,7 +9,7 @@ HOST=$(su - zimbra -c "zmhostname" 2>/dev/null || hostname -f)
 
 echo "== Memasang ZIMMON ke $DIR (host: $HOST, port: $PORT) =="
 mkdir -p "$DIR" /etc/zimmon
-cp -r "$SRC/server.py" "$SRC/static" "$SRC/VERSION" "$SRC/CHANGELOG.md" "$SRC/update.sh" "$SRC/install.sh" "$DIR/"
+tar -C "$SRC" --exclude=.git -cf - . | tar -C "$DIR" -xf -
 chmod 700 "$DIR"
 install -m 755 "$SRC/update.sh" /usr/local/bin/zimmon-update
 
