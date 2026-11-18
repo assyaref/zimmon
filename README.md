@@ -29,6 +29,8 @@ bash /opt/zimmon/install.sh --fail2ban
 
 Ini membuat jail `zimmon-manual` (ban manual dari aplikasi, semua port, permanen), plus jail otomatis untuk brute force SSH dan SMTP AUTH Zimbra. ZIMMON memblokir dengan memanggil `fail2ban-client`; IP server dan `127.0.0.1` tidak pernah bisa diblokir dari aplikasi. Jail diatur di `/etc/fail2ban/jail.d/zimmon.local`.
 
+Di aplikasi, panel **FIREWALL (FAIL2BAN)** menampilkan status (AKTIF/MATI) dengan tombol **AKTIFKAN / MATIKAN**. Mematikan fail2ban menghapus semua blokir yang sedang aktif dan menghentikan pemblokiran otomatis, jadi tombol BLOKIR per-IP hanya muncul saat fail2ban sedang jalan.
+
 ## Update / upgrade
 
 ```bash

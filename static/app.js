@@ -218,12 +218,26 @@
   let fw = {};
   function renderFirewall(f) {
     fw = f || {};
-    $("fwState").textContent = !fw.on ? "— fail2ban tidak aktif di server"
-      : (fw.blocked && fw.blocked.length ? `(${fw.blocked.length} IP · jail ${fw.jail})` : "(belum ada)");
-    $("fwList").innerHTML = (fw.blocked || []).map((ip) =>
-      `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}" target="_blank" rel="noopener noreferrer">${esc(ip)}</a>` +
-      `<button class="fw-btn open" data-unblock="${esc(ip)}">BUKA BLOKIR</button></div>`
-    ).join("") || (fw.on ? '<span class="dim">Belum ada IP yang diblokir.</span>' : "");
+    const installed = !!fw.on, active = !!fw.active;
+    $("fwState").textContent = !installed ? "— tidak terpasang di server"
+      : !active ? "— MATI"
+      : (fw.blocked && fw.blocked.length ? `AKTIF · ${fw.blocked.length} IP diblokir · jail ${fw.jail}` : "AKTIF · belum ada blokir");
+    $("fwToggleWrap").innerHTML = !installed ? ""
+      : active ? `<button class="fw-btn open" data-fwtoggle="disable">MATIKAN</button>`
+               : `<button class="fw-btn" data-fwtoggle="enable">AKTIFKAN</button>`;
+    $("fwList").innerHTML = !active ? ""
+      : ((fw.blocked || []).map((ip) =>
+          `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}" target="_blank" rel="noopener noreferrer">${esc(ip)}</a>` +
+          `<button class="fw-btn open" data-unblock="${esc(ip)}">BUKA BLOKIR</button></div>`
+        ).join("") || '<span class="dim">Belum ada IP yang diblokir.</span>');
+  }
+
+  async function fwToggle(action) {
+    const r = await fetch("/api/fw-" + action, { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return alert("Gagal: " + (j.error || r.status));
+    renderFirewall({ ...fw, active: j.active, blocked: j.blocked || [] });
+    poll();  // tombol BLOKIR per-IP ikut muncul/hilang sesuai status
   }
 
   async function fwAction(ip, unblock) {
@@ -242,6 +256,12 @@
     const u = e.target.closest("button[data-unblock]");
     if (b && confirm(`Blokir IP ${b.dataset.block} di firewall server? Semua koneksi dari IP ini akan ditolak.`)) fwAction(b.dataset.block, false);
     if (u && confirm(`Buka blokir untuk ${u.dataset.unblock}?`)) fwAction(u.dataset.unblock, true);
+    const t = e.target.closest("button[data-fwtoggle]");
+    if (t) {
+      const off = t.dataset.fwtoggle === "disable";
+      if (confirm(off ? "Matikan fail2ban? Semua IP yang sedang diblokir akan dibuka dan brute force tidak lagi diblokir otomatis."
+                      : "Aktifkan fail2ban? SSH & SMTP brute force akan diblokir otomatis.")) fwToggle(t.dataset.fwtoggle);
+    }
   });
 
   function renderAttacks(a) {
@@ -269,7 +289,7 @@
     const bset = new Set(fw.blocked || []);
     $("atkTop").innerHTML = (a.top || []).map((x) =>
       `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(x.ip)}" target="_blank" rel="noopener noreferrer">${esc(x.ip)}</a><span class="n">${x.n}×</span>` +
-      (fw.on ? (bset.has(x.ip)
+      (fw.active ? (bset.has(x.ip)
         ? `<button class="fw-btn done" disabled>DIBLOKIR</button>`
         : `<button class="fw-btn" data-block="${esc(x.ip)}">BLOKIR</button>`) : "") +
       `<span class="meta">${x.asn ? `<span class="asn">${esc(asnText(x.asn))}</span>` : ""}${x.recent >= 10 ? '<span class="live">● AKTIF · </span>' : ""}${esc(x.cats.join(", "))} · ${ago(x.last)}${x.who.length ? " · " + esc(x.who.join(", ")) : ""}</span></div>`

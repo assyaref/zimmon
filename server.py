@@ -682,6 +682,28 @@ def set_block(ip, unblock=False):
     return False, (err or out or "gagal")[:200]
 
 
+def fw_active():
+    try:
+        return subprocess.run(["systemctl", "is-active", "--quiet", "fail2ban"], timeout=10).returncode == 0
+    except Exception:
+        return False
+
+
+def fw_service(enable):
+    """Start+enable (True) or stop+disable (False) the fail2ban service."""
+    if not F2B:
+        return False, "fail2ban belum terpasang di server"
+    verb = ["enable", "--now"] if enable else ["disable", "--now"]
+    try:
+        r = subprocess.run(["systemctl", *verb, "fail2ban"], capture_output=True, text=True, timeout=45)
+    except Exception as e:
+        return False, str(e)[:200]
+    _BLOCK_CACHE["ts"] = 0.0
+    if r.returncode == 0:
+        return True, ""
+    return False, ((r.stderr or r.stdout).strip() or "gagal")[:200]
+
+
 # ---------------------------------------------------------------- websocket terminal
 def term_log(msg):
     try:
@@ -851,7 +873,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with LOCK:
                 data = json.loads(json.dumps(STATE))
             data["attacks"] = DET.snapshot() if DET else {}
-            data["firewall"] = {"on": bool(F2B), "jail": FW_JAIL, "blocked": blocked_ips()}
+            fw_up = fw_active()
+            data["firewall"] = {"on": bool(F2B), "active": fw_up, "jail": FW_JAIL, "blocked": blocked_ips() if fw_up else []}
             return self.send_json(200, data)
         if path == "/api/session":
             return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
@@ -937,6 +960,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if sid:
                 SESSIONS.pop(sid, None)
             return self.send_json(200, {"ok": True}, "zm_sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+        if path in ("/api/fw-enable", "/api/fw-disable"):
+            if not self.session():
+                return self.send_json(401, {"error": "unauthorized"})
+            enable = path == "/api/fw-enable"
+            ok, msg = fw_service(enable)
+            if ok:
+                print(f"firewall: service {'ENABLE' if enable else 'DISABLE'} from {ip}", flush=True)
+                time.sleep(1)
+                up = fw_active()
+                return self.send_json(200, {"ok": True, "active": up, "blocked": blocked_ips(max_age=0) if up else []})
+            return self.send_json(503 if "belum terpasang" in msg else 500, {"error": msg})
         if path in ("/api/block", "/api/unblock"):
             if not self.session():
                 return self.send_json(401, {"error": "unauthorized"})
