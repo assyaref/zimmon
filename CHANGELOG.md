@@ -1,5 +1,8 @@
 # ZIMMON changelog
 
+## 1.7.0 — 2026-11-19
+- **Blokir massal**: tombol **BLOKIR MASSAL** di panel Deteksi Serangan untuk memblokir banyak IP sekaligus — pilih "penyerang aktif saja" atau "semua penyerang teratas". IP privat/tidak valid/IP sendiri dilewati, yang sudah diblokir tidak diblokir ulang. Hanya muncul saat fail2ban aktif
+
 ## 1.6.3 — 2026-11-19
 - Tombol **CLEAR** di panel Deteksi Serangan: mengosongkan tampilan deteksi (event di memori ZIMMON) dengan konfirmasi. Data lalu dihitung ulang dari aktivitas log baru; **file log sistem di server tidak dihapus**, dan hitungan email terkirim tetap. Setelah ZIMMON restart, data 24 jam terbentuk lagi dari log
 

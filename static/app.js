@@ -49,23 +49,26 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ---------------- themed modal + toast ----------------
-  function uiConfirm({ title, body, ok = "OK", danger = false }) {
+  function uiConfirm({ title, body, ok = "OK", danger = false, choices = null }) {
     return new Promise((resolve) => {
       $("modalTitle").textContent = title;
-      $("modalBody").innerHTML = body;   // body is built from app strings only
+      const opts = choices ? `<div class="mopts">${choices.map((c, i) =>
+        `<label class="mopt"><input type="radio" name="mopt" value="${esc(c.value)}" ${i === 0 ? "checked" : ""}>${esc(c.label)}</label>`).join("")}</div>` : "";
+      $("modalBody").innerHTML = body + opts;   // body/labels are built from app strings only
       const okb = $("modalOk"), cancel = $("modalCancel"), modal = $("modal");
       okb.textContent = ok;
       okb.className = "mbtn" + (danger ? " danger" : "");
       modal.classList.remove("hidden");
       okb.focus();
+      const pick = () => choices ? (modal.querySelector("input[name=mopt]:checked") || {}).value || false : true;
       const done = (v) => {
         modal.classList.add("hidden");
         okb.onclick = cancel.onclick = modal.onclick = null;
         document.removeEventListener("keydown", onKey);
         resolve(v);
       };
-      const onKey = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(true); };
-      okb.onclick = () => done(true);
+      const onKey = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(pick()); };
+      okb.onclick = () => done(pick());
       cancel.onclick = () => done(false);
       modal.onclick = (e) => { if (e.target === modal) done(false); };
       document.addEventListener("keydown", onKey);
@@ -166,6 +169,7 @@
     checkVersion(s.version);
     $("uptime").textContent = fmtUptime(s.uptime);
     const atk = s.attacks || {};
+    atkData = atk;
     $("sentToday").textContent = atk.sent_today !== undefined ? `${atk.sent_today} ✉` : "—";
     renderFirewall(s.firewall || {});
     renderAttacks(atk);
@@ -249,12 +253,14 @@
   const asnText = (x) => x ? `${flag(x.cc)}AS${x.asn} ${x.name}` : "";
 
   let fw = {};
+  let atkData = {};
   function renderFirewall(f) {
     fw = f || {};
     const installed = !!fw.on, active = !!fw.active;
     $("fwState").textContent = !installed ? "— tidak terpasang di server"
       : !active ? "— MATI"
       : (fw.blocked && fw.blocked.length ? `AKTIF · ${fw.blocked.length} IP diblokir · jail ${fw.jail}` : "AKTIF · belum ada blokir");
+    $("atkMass").classList.toggle("hidden", !active);
     $("fwToggleWrap").innerHTML = !installed ? ""
       : active ? `<button class="fw-btn open" data-fwtoggle="disable">MATIKAN</button>`
                : `<button class="fw-btn" data-fwtoggle="enable">AKTIFKAN</button>`;
@@ -263,6 +269,20 @@
           `<div class="atk-row"><a href="https://www.abuseipdb.com/check/${encodeURIComponent(ip)}" target="_blank" rel="noopener noreferrer">${esc(ip)}</a>` +
           `<button class="fw-btn open" data-unblock="${esc(ip)}">BUKA BLOKIR</button></div>`
         ).join("") || '<span class="dim">Belum ada IP yang diblokir.</span>');
+  }
+
+  async function massBlock(which) {
+    const list = which === "active" ? (atkData.active || []) : (atkData.top || []);
+    const ips = [...new Set(list.map((x) => x.ip))];
+    if (!ips.length) return toast("Tidak ada IP untuk diblokir");
+    const r = await fetch("/api/block-bulk", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return toast("Gagal: " + (j.error || r.status), "err");
+    renderFirewall({ ...fw, blocked: j.blocked || [] });
+    toast(`${j.added} IP diblokir` + (j.skipped ? `, ${j.skipped} dilewati` : "") + (j.failed ? `, ${j.failed} gagal` : ""));
+    poll();
   }
 
   async function clearAttacks() {
@@ -297,6 +317,20 @@
 
   // one delegated handler for every block / unblock button
   $("atkPanel").addEventListener("click", async (e) => {
+    if (e.target.closest("#atkMass")) {
+      const nActive = (atkData.active || []).length, nTop = [...new Set((atkData.top || []).map((x) => x.ip))].length;
+      const choice = await uiConfirm({
+        title: "BLOKIR MASSAL",
+        body: "Blokir banyak IP penyerang sekaligus di firewall server:",
+        ok: "BLOKIR", danger: true,
+        choices: [
+          { value: "active", label: `Penyerang aktif saja (${nActive} IP)` },
+          { value: "top", label: `Semua penyerang teratas (${nTop} IP)` },
+        ],
+      });
+      if (choice) massBlock(choice);
+      return;
+    }
     if (e.target.closest("#atkClear")) {
       if (await uiConfirm({ title: "CLEAR LOG SERANGAN", body: "Kosongkan tampilan deteksi serangan? Data dihitung ulang dari aktivitas baru.<br>Log sistem di server <b>tidak</b> dihapus.", ok: "CLEAR", danger: true }))
         clearAttacks();

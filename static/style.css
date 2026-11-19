@@ -179,6 +179,11 @@ button{font:inherit;cursor:pointer}
 .modal-title::before{content:"// "}
 .modal-body{color:var(--dim);font-size:13px;line-height:1.6;margin-bottom:18px}
 .modal-body b{color:var(--g);font-weight:700}
+.mopts{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.mopt{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--g);cursor:pointer;
+  border:1px solid var(--line);padding:9px 11px;letter-spacing:.02em}
+.mopt:hover{border-color:var(--g2)}
+.mopt input{accent-color:var(--g);width:15px;height:15px;margin:0;flex:none}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end}
 .mbtn{font:inherit;font-size:11px;letter-spacing:.14em;font-weight:800;padding:10px 18px;cursor:pointer;
   background:var(--g);color:#001a0d;border:1px solid var(--g)}
