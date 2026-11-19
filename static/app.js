@@ -48,6 +48,39 @@
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // ---------------- themed modal + toast ----------------
+  function uiConfirm({ title, body, ok = "OK", danger = false }) {
+    return new Promise((resolve) => {
+      $("modalTitle").textContent = title;
+      $("modalBody").innerHTML = body;   // body is built from app strings only
+      const okb = $("modalOk"), cancel = $("modalCancel"), modal = $("modal");
+      okb.textContent = ok;
+      okb.className = "mbtn" + (danger ? " danger" : "");
+      modal.classList.remove("hidden");
+      okb.focus();
+      const done = (v) => {
+        modal.classList.add("hidden");
+        okb.onclick = cancel.onclick = modal.onclick = null;
+        document.removeEventListener("keydown", onKey);
+        resolve(v);
+      };
+      const onKey = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(true); };
+      okb.onclick = () => done(true);
+      cancel.onclick = () => done(false);
+      modal.onclick = (e) => { if (e.target === modal) done(false); };
+      document.addEventListener("keydown", onKey);
+    });
+  }
+
+  function toast(msg, type = "") {
+    const t = document.createElement("div");
+    t.className = "toast" + (type ? " " + type : "");
+    t.textContent = msg;
+    $("toasts").appendChild(t);
+    requestAnimationFrame(() => t.classList.add("show"));
+    setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 3600);
+  }
+
   // ---------------- auth ----------------
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -235,8 +268,9 @@
   async function fwToggle(action) {
     const r = await fetch("/api/fw-" + action, { method: "POST" });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return alert("Gagal: " + (j.error || r.status));
+    if (!r.ok) return toast("Gagal: " + (j.error || r.status), "err");
     renderFirewall({ ...fw, active: j.active, blocked: j.blocked || [] });
+    toast(action === "enable" ? "fail2ban diaktifkan" : "fail2ban dimatikan");
     poll();  // tombol BLOKIR per-IP ikut muncul/hilang sesuai status
   }
 
@@ -246,21 +280,37 @@
       body: JSON.stringify({ ip }),
     });
     const j = await r.json().catch(() => ({}));
-    if (r.ok) renderFirewall({ ...fw, blocked: j.blocked || [] });
-    else alert((unblock ? "Gagal buka blokir: " : "Gagal blokir: ") + (j.error || r.status));
+    if (r.ok) {
+      renderFirewall({ ...fw, blocked: j.blocked || [] });
+      toast(unblock ? `Blokir dibuka: ${ip}` : `IP diblokir: ${ip}`);
+    } else {
+      toast((unblock ? "Gagal buka blokir: " : "Gagal blokir: ") + (j.error || r.status), "err");
+    }
   }
 
   // one delegated handler for every block / unblock button
-  $("atkPanel").addEventListener("click", (e) => {
+  $("atkPanel").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-block]");
+    if (b) {
+      if (await uiConfirm({ title: "BLOKIR IP", body: `Blokir <b>${esc(b.dataset.block)}</b> di firewall server?<br>Semua koneksi dari IP ini akan ditolak.`, ok: "BLOKIR", danger: true }))
+        fwAction(b.dataset.block, false);
+      return;
+    }
     const u = e.target.closest("button[data-unblock]");
-    if (b && confirm(`Blokir IP ${b.dataset.block} di firewall server? Semua koneksi dari IP ini akan ditolak.`)) fwAction(b.dataset.block, false);
-    if (u && confirm(`Buka blokir untuk ${u.dataset.unblock}?`)) fwAction(u.dataset.unblock, true);
+    if (u) {
+      if (await uiConfirm({ title: "BUKA BLOKIR", body: `Buka blokir untuk <b>${esc(u.dataset.unblock)}</b>?<br>IP ini bisa terhubung lagi ke server.`, ok: "BUKA BLOKIR" }))
+        fwAction(u.dataset.unblock, true);
+      return;
+    }
     const t = e.target.closest("button[data-fwtoggle]");
     if (t) {
       const off = t.dataset.fwtoggle === "disable";
-      if (confirm(off ? "Matikan fail2ban? Semua IP yang sedang diblokir akan dibuka dan brute force tidak lagi diblokir otomatis."
-                      : "Aktifkan fail2ban? SSH & SMTP brute force akan diblokir otomatis.")) fwToggle(t.dataset.fwtoggle);
+      if (await uiConfirm({
+        title: off ? "MATIKAN FAIL2BAN" : "AKTIFKAN FAIL2BAN",
+        body: off ? "Matikan fail2ban? Semua IP yang sedang diblokir akan <b>dibuka</b>, dan brute force tidak lagi diblokir otomatis."
+                  : "Aktifkan fail2ban? Brute force SSH & SMTP akan diblokir otomatis.",
+        ok: off ? "MATIKAN" : "AKTIFKAN", danger: off,
+      })) fwToggle(t.dataset.fwtoggle);
     }
   });
 
@@ -370,7 +420,7 @@
   }
 
   async function openTerm() {
-    try { await loadXterm(); } catch { alert("Gagal memuat terminal"); return; }
+    try { await loadXterm(); } catch { toast("Gagal memuat terminal", "err"); return; }
     $("term").classList.remove("hidden");
     $("termHost").textContent = $("host").textContent.toUpperCase();
     if (!term) {
