@@ -1,5 +1,8 @@
 # ZIMMON changelog
 
+## 1.6.1 — 2026-11-19
+- Dialog konfirmasi dan notifikasi tidak lagi memakai pop-up bawaan browser. Konfirmasi blokir/buka blokir/aktif-matikan fail2ban kini modal bergaya ZIMMON, dan hasilnya muncul sebagai toast (hijau untuk sukses, merah untuk gagal)
+
 ## 1.6.0 — 2026-11-18
 - **Tombol BLOKIR IP**: setiap IP penyerang bisa diblokir dari aplikasi (lewat fail2ban), dengan konfirmasi; ada daftar **IP DIBLOKIR** untuk membukanya lagi
   - `install.sh` kini memasang & mengatur fail2ban otomatis (jail manual `zimmon-manual` + brute force SSH + SMTP AUTH Zimbra). Atur ulang kapan saja: `bash install.sh --fail2ban`
