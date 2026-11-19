@@ -607,6 +607,14 @@ class Detector:
         with self.lock:
             return self.result
 
+    def clear(self):
+        """Reset the in-memory attack view. System log files are not touched; the
+        board re-fills from new log activity. Email counters are kept."""
+        with self.lock:
+            self.events.clear()
+            self.result = self._analyze(time.time())
+            return dict(self.result)
+
 
 # ---------------------------------------------------------------- auth
 def check_login(user, password):
@@ -963,6 +971,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if sid:
                 SESSIONS.pop(sid, None)
             return self.send_json(200, {"ok": True}, "zm_sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+        if path == "/api/attacks-clear":
+            if not self.session():
+                return self.send_json(401, {"error": "unauthorized"})
+            snap = DET.clear() if DET else {}
+            print(f"attacks: cleared from {ip}", flush=True)
+            return self.send_json(200, {"ok": True, "attacks": snap})
         if path in ("/api/fw-enable", "/api/fw-disable"):
             if not self.session():
                 return self.send_json(401, {"error": "unauthorized"})

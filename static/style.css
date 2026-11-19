@@ -162,6 +162,8 @@ button{font:inherit;cursor:pointer}
 .fw-btn.open:hover{background:var(--g2);color:#00140b}
 #atkTop .atk-row{grid-template-columns:1fr auto auto}
 #atkTop .atk-row .n{grid-column:3}
+.fw-btn.clear{float:right;margin-left:8px;border-color:var(--line);color:var(--dim)}
+.fw-btn.clear:hover{border-color:var(--amber);color:var(--amber)}
 #atkTop .fw-btn{grid-column:2;align-self:center}
 
 
