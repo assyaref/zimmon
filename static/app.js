@@ -265,6 +265,13 @@
         ).join("") || '<span class="dim">Belum ada IP yang diblokir.</span>');
   }
 
+  async function clearAttacks() {
+    const r = await fetch("/api/attacks-clear", { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { renderAttacks(j.attacks || {}); toast("Log serangan dikosongkan"); }
+    else toast("Gagal: " + (j.error || r.status), "err");
+  }
+
   async function fwToggle(action) {
     const r = await fetch("/api/fw-" + action, { method: "POST" });
     const j = await r.json().catch(() => ({}));
@@ -290,6 +297,11 @@
 
   // one delegated handler for every block / unblock button
   $("atkPanel").addEventListener("click", async (e) => {
+    if (e.target.closest("#atkClear")) {
+      if (await uiConfirm({ title: "CLEAR LOG SERANGAN", body: "Kosongkan tampilan deteksi serangan? Data dihitung ulang dari aktivitas baru.<br>Log sistem di server <b>tidak</b> dihapus.", ok: "CLEAR", danger: true }))
+        clearAttacks();
+      return;
+    }
     const b = e.target.closest("button[data-block]");
     if (b) {
       if (await uiConfirm({ title: "BLOKIR IP", body: `Blokir <b>${esc(b.dataset.block)}</b> di firewall server?<br>Semua koneksi dari IP ini akan ditolak.`, ok: "BLOKIR", danger: true }))

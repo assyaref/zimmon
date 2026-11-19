@@ -607,6 +607,14 @@ class Detector:
         with self.lock:
             return self.result
 
+    def clear(self):
+        """Reset the in-memory attack view. System log files are not touched; the
+        board re-fills from new log activity. Email counters are kept."""
+        with self.lock:
+            self.events.clear()
+            self.result = self._analyze(time.time())
+            return dict(self.result)
+
 
 # ---------------------------------------------------------------- auth
 def check_login(user, password):
@@ -626,7 +634,9 @@ def locked(ip):
 
 # ---------------------------------------------------------------- firewall (block IPs via fail2ban)
 FW_JAIL = str(CONF.get("fail2ban_jail", "zimmon-manual"))
-F2B = shutil.which("fail2ban-client")   # None when fail2ban is not installed
+def f2b_bin():
+    # resolved on each use (not cached) so fail2ban installed after ZIMMON started is picked up
+    return shutil.which("fail2ban-client")
 _BLOCK_CACHE = {"ts": 0.0, "ips": []}
 
 
@@ -652,10 +662,11 @@ def valid_public_ip(ip):
 
 def _f2b(*args, timeout=15):
     """Run fail2ban-client with fixed arguments (never a shell). Returns (code, out, err) or None."""
-    if not F2B:
+    b = f2b_bin()
+    if not b:
         return None
     try:
-        r = subprocess.run([F2B, *args], capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run([b, *args], capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:
         return -1, "", str(e)
@@ -691,7 +702,7 @@ def fw_active():
 
 def fw_service(enable):
     """Start+enable (True) or stop+disable (False) the fail2ban service."""
-    if not F2B:
+    if not f2b_bin():
         return False, "fail2ban belum terpasang di server"
     verb = ["enable", "--now"] if enable else ["disable", "--now"]
     try:
@@ -874,7 +885,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = json.loads(json.dumps(STATE))
             data["attacks"] = DET.snapshot() if DET else {}
             fw_up = fw_active()
-            data["firewall"] = {"on": bool(F2B), "active": fw_up, "jail": FW_JAIL, "blocked": blocked_ips() if fw_up else []}
+            data["firewall"] = {"on": bool(f2b_bin()), "active": fw_up, "jail": FW_JAIL, "blocked": blocked_ips() if fw_up else []}
             return self.send_json(200, data)
         if path == "/api/session":
             return self.send_json(200, {"ok": bool(self.session()), "version": VERSION, "terminal": TERMINAL_ON})
@@ -960,6 +971,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if sid:
                 SESSIONS.pop(sid, None)
             return self.send_json(200, {"ok": True}, "zm_sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+        if path == "/api/attacks-clear":
+            if not self.session():
+                return self.send_json(401, {"error": "unauthorized"})
+            snap = DET.clear() if DET else {}
+            print(f"attacks: cleared from {ip}", flush=True)
+            return self.send_json(200, {"ok": True, "attacks": snap})
         if path in ("/api/fw-enable", "/api/fw-disable"):
             if not self.session():
                 return self.send_json(401, {"error": "unauthorized"})
