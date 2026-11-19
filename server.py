@@ -971,6 +971,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if sid:
                 SESSIONS.pop(sid, None)
             return self.send_json(200, {"ok": True}, "zm_sid=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict")
+        if path == "/api/block-bulk":
+            if not self.session():
+                return self.send_json(401, {"error": "unauthorized"})
+            if not f2b_bin():
+                return self.send_json(503, {"error": "fail2ban belum terpasang di server"})
+            try:
+                n = min(int(self.headers.get("Content-Length", 0)), 16384)
+                ips = json.loads(self.rfile.read(n) or b"{}").get("ips", [])
+            except Exception:
+                return self.send_json(400, {"error": "bad request"})
+            if not isinstance(ips, list):
+                return self.send_json(400, {"error": "bad request"})
+            own = own_ips()
+            current = set(blocked_ips(max_age=0))
+            added = skipped = failed = 0
+            seen = set()
+            for raw in ips[:200]:
+                t = str(raw)[:64].strip()
+                if t in seen:
+                    continue
+                seen.add(t)
+                if t in current:   # already blocked
+                    continue
+                if not valid_public_ip(t) or t == ip or t in own:
+                    skipped += 1
+                    continue
+                ok, _ = set_block(t)
+                if ok:
+                    added += 1
+                else:
+                    failed += 1
+            print(f"firewall: BULK block added={added} failed={failed} skipped={skipped} from {ip}", flush=True)
+            return self.send_json(200, {"ok": True, "added": added, "failed": failed, "skipped": skipped, "blocked": blocked_ips(max_age=0)})
         if path == "/api/attacks-clear":
             if not self.session():
                 return self.send_json(401, {"error": "unauthorized"})
