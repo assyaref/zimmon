@@ -1,5 +1,8 @@
 # ZIMMON changelog
 
+## 1.6.2 — 2026-11-19
+- **Perbaikan**: ZIMMON kini mengenali fail2ban yang dipasang *setelah* ZIMMON berjalan, tanpa perlu restart. Sebelumnya, kalau `install.sh --fail2ban` dijalankan saat ZIMMON sudah jalan, tombol BLOKIR tetap error "fail2ban belum terpasang" sampai `systemctl restart zimmon`
+
 ## 1.6.1 — 2026-11-19
 - Dialog konfirmasi dan notifikasi tidak lagi memakai pop-up bawaan browser. Konfirmasi blokir/buka blokir/aktif-matikan fail2ban kini modal bergaya ZIMMON, dan hasilnya muncul sebagai toast (hijau untuk sukses, merah untuk gagal)
 
